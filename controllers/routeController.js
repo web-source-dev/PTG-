@@ -1,6 +1,7 @@
 const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
 const Truck = require('../models/Truck');
+const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const locationService = require('../utils/locationService');
 const {

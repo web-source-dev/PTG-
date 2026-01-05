@@ -1,5 +1,6 @@
 const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
+const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const routeTrackingService = require('../utils/routeTrackingService');
 const { ROUTE_STATE } = require('../constants/status');
