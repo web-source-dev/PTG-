@@ -3,7 +3,7 @@ const TransportJob = require('../models/TransportJob');
 const Truck = require('../models/Truck');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
-const routeTrackingService = require('../utils/routeTrackingService');
+const routeTracker = require('../utils/routeTracker');
 const { ROUTE_STATE, TRUCK_STATUS } = require('../constants/status');
 
 // Helper function to determine route action from status change
@@ -194,15 +194,9 @@ exports.updateMyRoute = async (req, res) => {
             });
           }
 
-          // Initialize route tracking
-          try {
-            await routeTrackingService.initializeTracking(routeId, req.user._id);
-          } catch (trackingError) {
-            console.error('❌ Failed to initialize route tracking:', trackingError);
-          }
 
-          // Log to both audit log and route tracking
-          await AuditLog.create({
+          // Log to audit log
+          const startAuditLog = await AuditLog.create({
             action: 'start_route',
             entityType: 'route',
             entityId: routeId,
@@ -213,14 +207,12 @@ exports.updateMyRoute = async (req, res) => {
             notes: 'Started route'
           });
 
-          await routeTrackingService.addActionEntry(routeId, 'start_route', req.body.currentLocation, {
-            routeStatus: 'In Progress',
-            routeState: ROUTE_STATE.STARTED
-          });
+          // Initialize route tracking
+          await routeTracker.initializeTracking(routeId, req.user._id, route.truckId, startAuditLog._id);
           break;
         case 'stop_route':
           updateData.state = ROUTE_STATE.STOPPED;
-          await AuditLog.create({
+          const stopAuditLog = await AuditLog.create({
             action: 'stop_route',
             entityType: 'route',
             entityId: routeId,
@@ -230,13 +222,13 @@ exports.updateMyRoute = async (req, res) => {
             routeId,
             notes: 'Stopped route'
           });
-          await routeTrackingService.addActionEntry(routeId, 'stop_route', req.body.currentLocation, {
-            routeState: ROUTE_STATE.STOPPED
-          });
+
+          // Add action to route tracking
+          await routeTracker.addActionEntry(routeId, 'stop_route', req.body.currentLocation, stopAuditLog._id);
           break;
         case 'resume_route':
           updateData.state = ROUTE_STATE.RESUMED;
-          await AuditLog.create({
+          const resumeAuditLog = await AuditLog.create({
             action: 'resume_route',
             entityType: 'route',
             entityId: routeId,
@@ -246,17 +238,16 @@ exports.updateMyRoute = async (req, res) => {
             routeId,
             notes: 'Resumed route'
           });
-          await routeTrackingService.addActionEntry(routeId, 'resume_route', req.body.currentLocation, {
-            routeState: ROUTE_STATE.RESUMED
-          });
+
+          // Add action to route tracking
+          await routeTracker.addActionEntry(routeId, 'resume_route', req.body.currentLocation, resumeAuditLog._id);
           break;
         case 'complete_route':
           updateData.status = 'Completed';
           updateData.state = ROUTE_STATE.COMPLETED;
           updateData.actualEndDate = new Date();
 
-          // Log to both audit log and route tracking
-          await AuditLog.create({
+          const completeAuditLog = await AuditLog.create({
             action: 'complete_route',
             entityType: 'route',
             entityId: routeId,
@@ -267,17 +258,8 @@ exports.updateMyRoute = async (req, res) => {
             notes: 'Completed route'
           });
 
-          await routeTrackingService.addActionEntry(routeId, 'complete_route', req.body.currentLocation, {
-            routeStatus: 'Completed',
-            routeState: ROUTE_STATE.COMPLETED
-          });
-
           // Complete route tracking
-          try {
-            await routeTrackingService.completeTracking(routeId);
-          } catch (trackingError) {
-            console.error('❌ Failed to complete route tracking:', trackingError);
-          }
+          await routeTracker.completeTracking(routeId, completeAuditLog._id);
 
           // Remove current route from user model
           await User.findByIdAndUpdate(req.user._id, {
@@ -405,7 +387,7 @@ exports.updateMyRoute = async (req, res) => {
             const stopPhotos = newPhotos.filter(p => p.photoType !== 'vehicle').length;
 
             if (vehiclePhotos > 0) {
-              await AuditLog.create({
+              const vehiclePhotoAuditLog = await AuditLog.create({
                 action: 'upload_vehicle_photo',
                 entityType: 'route',
                 entityId: routeId,
@@ -420,7 +402,9 @@ exports.updateMyRoute = async (req, res) => {
                 },
                 notes: `Uploaded ${vehiclePhotos} vehicle photo(s) for ${updatedStop.stopType} stop`
               });
-              await routeTrackingService.addActionEntry(routeId, 'upload_vehicle_photo', req.body.currentLocation, {
+
+              // Add to route tracking
+              await routeTracker.addActionEntry(routeId, 'upload_vehicle_photo', req.body.currentLocation, vehiclePhotoAuditLog._id, {
                 stopId: updatedStop._id || updatedStop.id,
                 stopType: updatedStop.stopType,
                 photoCount: vehiclePhotos
@@ -428,7 +412,7 @@ exports.updateMyRoute = async (req, res) => {
             }
 
             if (stopPhotos > 0) {
-              await AuditLog.create({
+              const stopPhotoAuditLog = await AuditLog.create({
                 action: 'upload_stop_photo',
                 entityType: 'route',
                 entityId: routeId,
@@ -443,11 +427,14 @@ exports.updateMyRoute = async (req, res) => {
                 },
                 notes: `Uploaded ${stopPhotos} stop photo(s) for ${updatedStop.stopType} stop`
               });
-              await routeTrackingService.addActionEntry(routeId, 'upload_stop_photo', req.body.currentLocation, {
+
+              // Add to route tracking
+              await routeTracker.addActionEntry(routeId, 'upload_stop_photo', req.body.currentLocation, stopPhotoAuditLog._id, {
                 stopId: updatedStop._id || updatedStop.id,
                 stopType: updatedStop.stopType,
                 photoCount: stopPhotos
               });
+            }
 
               // Sync photos to transport job
               if ((updatedStop.stopType === 'pickup' || updatedStop.stopType === 'drop') && updatedStop.transportJobId) {
@@ -469,7 +456,6 @@ exports.updateMyRoute = async (req, res) => {
                   }
                 }
               }
-            }
           }
         }
 
@@ -500,18 +486,13 @@ exports.updateMyRoute = async (req, res) => {
                 },
                 notes: `Completed checklist item: ${updatedItem.item}`
               });
-              await routeTrackingService.addActionEntry(routeId, 'complete_checklist_item', req.body.currentLocation, {
-                stopId: updatedStop._id || updatedStop.id,
-                stopType: updatedStop.stopType,
-                checklistItem: updatedItem.item
-              });
             }
           }
         }
 
         // Log stop completion
         if (updatedStop.status === 'Completed' && originalStop.status !== 'Completed') {
-          await AuditLog.create({
+          const stopCompleteAuditLog = await AuditLog.create({
             action: 'mark_stop_completed',
             entityType: 'route',
             entityId: routeId,
@@ -525,7 +506,9 @@ exports.updateMyRoute = async (req, res) => {
             },
             notes: `Marked ${updatedStop.stopType} stop as completed`
           });
-          await routeTrackingService.addActionEntry(routeId, 'mark_stop_completed', req.body.currentLocation, {
+
+          // Add to route tracking
+          await routeTracker.addActionEntry(routeId, 'mark_stop_completed', req.body.currentLocation, stopCompleteAuditLog._id, {
             stopId: updatedStop._id || updatedStop.id,
             stopType: updatedStop.stopType
           });
@@ -541,7 +524,7 @@ exports.updateMyRoute = async (req, res) => {
       if (newReportCount > 0) {
         const newReports = updateData.reports.slice(-newReportCount);
         for (const report of newReports) {
-          await AuditLog.create({
+          const reportAuditLog = await AuditLog.create({
             action: 'add_report',
             entityType: 'route',
             entityId: routeId,
@@ -554,7 +537,9 @@ exports.updateMyRoute = async (req, res) => {
             },
             notes: `Added report: ${report.report.substring(0, 50)}${report.report.length > 50 ? '...' : ''}`
           });
-          await routeTrackingService.addActionEntry(routeId, 'add_report', req.body.currentLocation, {
+
+          // Add to route tracking
+          await routeTracker.addActionEntry(routeId, 'add_report', req.body.currentLocation, reportAuditLog._id, {
             reportText: report.report
           });
         }

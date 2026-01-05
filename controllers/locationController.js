@@ -1,7 +1,7 @@
 const locationService = require('../utils/locationService');
-const routeTrackingService = require('../utils/routeTrackingService');
 const Route = require('../models/Route');
 const User = require('../models/User');
+const routeTracker = require('../utils/routeTracker');
 
 /**
  * Location Controller
@@ -168,23 +168,18 @@ exports.updateDriverLocation = async (req, res) => {
       accuracy
     }, routeId);
 
-    // If routeId is provided, add location entry to route tracking
-    if (routeId) {
+    // If driver has a current route, add location entry to route tracking
+    if (updatedUser.currentRouteId) {
       try {
-        const locationData = { latitude, longitude, accuracy };
-
-        // Get current route status for context
-        const route = await Route.findById(routeId).select('status state stops');
-        const context = route ? {
-          routeStatus: route.status,
-          routeState: route.state,
-          currentStopIndex: route.stops ? route.stops.findIndex(s => s.status === 'In Progress') : -1
-        } : {};
-
-        await routeTrackingService.addLocationEntry(routeId, locationData, context);
+        await routeTracker.addLocationEntry(
+          updatedUser.currentRouteId.toString(),
+          latitude,
+          longitude,
+          accuracy
+        );
       } catch (trackingError) {
-        console.error('Error adding location to tracking:', trackingError);
-        // Don't fail the location update if tracking fails
+        console.error('Error adding location to route tracking:', trackingError);
+        // Don't fail the request if tracking fails
       }
     }
 
@@ -247,6 +242,106 @@ exports.getAllDriversLocations = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to get drivers locations'
+    });
+  }
+};
+
+// Get route tracking data
+exports.getRouteTracking = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+
+    const RouteTracking = require('../models/routeTracker');
+    const tracking = await RouteTracking.findOne({ routeId }).populate('driverId', 'firstName lastName').populate('truckId', 'truckNumber');
+
+    if (!tracking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route tracking data not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: tracking
+    });
+  } catch (error) {
+    console.error('Get route tracking error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to get route tracking data'
+    });
+  }
+};
+
+// Update route tracking location (for automatic polling every 10 seconds)
+exports.updateRouteTracking = async (req, res) => {
+  try {
+    const { routeId } = req.params;
+    const { latitude, longitude, accuracy, driverId } = req.body;
+
+    console.log(`📍 Received route tracking update for route ${routeId}:`, { latitude, longitude, accuracy, driverId });
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        success: false,
+        message: 'Latitude and longitude are required'
+      });
+    }
+
+    // Find the route to get driver and truck info
+    const Route = require('../models/Route');
+    const route = await Route.findById(routeId);
+
+    if (!route) {
+      console.log(`📍 Route ${routeId} not found`);
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    // Check if route has a driver assigned
+    if (!route.driverId) {
+      console.log(`📍 Route ${routeId} has no driver assigned`);
+      return res.status(400).json({
+        success: false,
+        message: 'Route has no driver assigned'
+      });
+    }
+
+    // Update user location first
+    const updatedUser = await locationService.updateDriverLocation(driverId || route.driverId, {
+      latitude,
+      longitude,
+      accuracy
+    });
+
+    // Add location entry to route tracking
+    try {
+      const result = await routeTracker.addLocationEntry(
+        routeId,
+        latitude,
+        longitude,
+        accuracy
+      );
+
+      console.log(`📍 Route tracking updated successfully for route ${routeId}:`, result ? 'Entry added' : 'No entry added');
+    } catch (trackingError) {
+      console.error('Error adding location to route tracking:', trackingError);
+      // Don't fail the request if tracking fails
+    }
+
+    res.json({
+      success: true,
+      data: updatedUser,
+      message: 'Route tracking updated successfully'
+    });
+  } catch (error) {
+    console.error('Update route tracking error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update route tracking'
     });
   }
 };

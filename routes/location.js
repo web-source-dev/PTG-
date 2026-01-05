@@ -6,6 +6,12 @@ const { protect } = require('../middleware/auth');
 // Driver location updates (no auth required for background tracking)
 router.put('/drivers/:driverId/location', locationController.updateDriverLocation);
 
+// Route tracking updates (for automatic polling)
+router.put('/route-tracking/:routeId/update', locationController.updateRouteTracking);
+
+// Get route tracking data
+router.get('/route-tracking/:routeId', locationController.getRouteTracking);
+
 // Apply authentication to all other routes
 router.use(protect);
 

@@ -1,5 +1,6 @@
 const Expense = require('../models/Expense');
 const AuditLog = require('../models/AuditLog');
+const routeTracker = require('../utils/routeTracker');
 
 /**
  * Expense Controller
@@ -28,7 +29,7 @@ exports.createFuelExpense = async (req, res) => {
     });
 
     // Log the action
-    await AuditLog.create({
+    const auditLog = await AuditLog.create({
       action: 'add_fuel_expense',
       entityType: 'expense',
       entityId: expense._id,
@@ -45,6 +46,15 @@ exports.createFuelExpense = async (req, res) => {
       },
       notes: `Added fuel expense: ${expenseData.gallons} gallons for $${expenseData.totalCost}`
     });
+
+    // Add to route tracking if routeId provided
+    if (routeId) {
+      await routeTracker.addActionEntry(routeId, 'add_fuel_expense', expenseData.location, auditLog._id, {
+        expenseId: expense._id,
+        gallons: parseFloat(expenseData.gallons),
+        totalCost: parseFloat(expenseData.totalCost)
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -81,7 +91,7 @@ exports.createMaintenanceExpense = async (req, res) => {
     });
 
     // Log the action
-    await AuditLog.create({
+    const auditLog = await AuditLog.create({
       action: 'add_maintenance_expense',
       entityType: 'expense',
       entityId: expense._id,
@@ -97,6 +107,15 @@ exports.createMaintenanceExpense = async (req, res) => {
       },
       notes: `Added maintenance expense: ${expenseData.description} for $${expenseData.cost}`
     });
+
+    // Add to route tracking if routeId provided
+    if (routeId) {
+      await routeTracker.addActionEntry(routeId, 'add_maintenance_expense', expenseData.location, auditLog._id, {
+        expenseId: expense._id,
+        description: expenseData.description,
+        cost: parseFloat(expenseData.cost)
+      });
+    }
 
     res.status(201).json({
       success: true,
