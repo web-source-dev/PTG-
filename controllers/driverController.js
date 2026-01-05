@@ -1,9 +1,10 @@
 const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
+const Truck = require('../models/Truck');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const routeTrackingService = require('../utils/routeTrackingService');
-const { ROUTE_STATE } = require('../constants/status');
+const { ROUTE_STATE, TRUCK_STATUS } = require('../constants/status');
 
 // Helper function to determine route action from status change
 const getRouteActionFromStatus = (newStatus, oldStatus) => {
