@@ -135,7 +135,7 @@ class EmailService {
   async sendPasswordResetEmail(email, resetToken) {
     const subject = 'Password Reset Request';
     const data = {
-      resetUrl: `${emailDefaults.clientUrl}/reset-password/${resetToken}`
+      resetUrl: `${emailDefaults.clientUrl}/auth/reset-password?token=${resetToken}`
     };
 
     return await this.sendTemplatedEmail('password-reset', email, subject, data);
