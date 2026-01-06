@@ -213,7 +213,13 @@ exports.getAllRoutes = async (req, res) => {
     let query = {};
 
     if (status) {
-      query.status = status;
+      // Handle comma-separated status values
+      const statusArray = status.split(',').map(s => s.trim());
+      if (statusArray.length > 1) {
+        query.status = { $in: statusArray };
+      } else {
+        query.status = status;
+      }
     }
 
     if (driverId) {

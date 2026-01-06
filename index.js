@@ -46,6 +46,7 @@ app.use('/api/upload', require('./routes/upload'));
 app.use('/api/status', require('./routes/status'));
 app.use('/api/location', require('./routes/location'));
 app.use('/api/expenses', require('./routes/expense'));
+app.use('/api/search', require('./routes/search'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
