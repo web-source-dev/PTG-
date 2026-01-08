@@ -96,7 +96,7 @@ const routeSchema = new mongoose.Schema({
     ref: 'TransportJob'
   }],
 
-  // Stops on this Route (pickup, drop, break, rest)
+  // Stops on this Route (pickup, drop, break, rest, fuel)
   stops: [{
     // Stop Type
     stopType: {

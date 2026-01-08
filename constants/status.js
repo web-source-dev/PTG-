@@ -70,7 +70,8 @@ const ROUTE_STOP_TYPE = {
   PICKUP: 'pickup',
   DROP: 'drop',
   BREAK: 'break',
-  REST: 'rest'
+  REST: 'rest',
+  FUEL: 'fuel'
 };
 
 // Carrier Types
@@ -91,15 +92,25 @@ const getAllStatusEnums = () => {
         [ROUTE_STATUS.CANCELLED]: 'Cancelled'
       }
     },
-    routeStop: {
-      values: Object.values(ROUTE_STOP_STATUS),
-      labels: {
-        [ROUTE_STOP_STATUS.PENDING]: 'Pending',
-        [ROUTE_STOP_STATUS.IN_PROGRESS]: 'In Progress',
-        [ROUTE_STOP_STATUS.COMPLETED]: 'Completed',
-        [ROUTE_STOP_STATUS.SKIPPED]: 'Skipped'
-      }
-    },
+  routeStop: {
+    values: Object.values(ROUTE_STOP_STATUS),
+    labels: {
+      [ROUTE_STOP_STATUS.PENDING]: 'Pending',
+      [ROUTE_STOP_STATUS.IN_PROGRESS]: 'In Progress',
+      [ROUTE_STOP_STATUS.COMPLETED]: 'Completed',
+      [ROUTE_STOP_STATUS.SKIPPED]: 'Skipped'
+    }
+  },
+  routeStopType: {
+    values: Object.values(ROUTE_STOP_TYPE),
+    labels: {
+      [ROUTE_STOP_TYPE.PICKUP]: 'Pickup',
+      [ROUTE_STOP_TYPE.DROP]: 'Drop',
+      [ROUTE_STOP_TYPE.BREAK]: 'Break',
+      [ROUTE_STOP_TYPE.REST]: 'Rest',
+      [ROUTE_STOP_TYPE.FUEL]: 'Fuel'
+    }
+  },
     transportJob: {
       values: Object.values(TRANSPORT_JOB_STATUS),
       labels: {

@@ -2,6 +2,7 @@ const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
 const Truck = require('../models/Truck');
 const User = require('../models/User');
+const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
 const locationService = require('../utils/locationService');
 const {
@@ -23,41 +24,6 @@ exports.createRoute = async (req, res) => {
       routeData.lastUpdatedBy = req.user._id;
     }
 
-    // Validate driver and truck exist and are available
-    if (routeData.driverId && routeData.truckId) {
-      // Check if truck is available
-      const truck = await Truck.findById(routeData.truckId);
-      if (!truck) {
-        return res.status(404).json({
-          success: false,
-          message: 'Truck not found'
-        });
-      }
-
-      if (truck.status !== 'Available') {
-        return res.status(400).json({
-          success: false,
-          message: 'Selected truck is not available. Please select an available truck.'
-        });
-      }
-
-      // Check if driver is available (no active route)
-      const driver = await User.findById(routeData.driverId);
-      if (!driver) {
-        return res.status(404).json({
-          success: false,
-          message: 'Driver not found'
-        });
-      }
-
-      if (driver.currentRouteId) {
-        return res.status(400).json({
-          success: false,
-          message: 'Selected driver already has an active route. Please select a driver without an active route.'
-        });
-      }
-    }
-
     // Initialize checklists for stops if not provided
     if (routeData.stops && Array.isArray(routeData.stops)) {
       routeData.stops = routeData.stops.map(stop => {
@@ -71,6 +37,15 @@ exports.createRoute = async (req, res) => {
 
     // Create route
     const route = await Route.create(routeData);
+
+    // Create route tracker
+    await RouteTracking.create({
+      routeId: route._id,
+      driverId: routeData.driverId,
+      truckId: routeData.truckId,
+      status: 'active',
+      history: []
+    });
 
     // Log route creation
     await AuditLog.create({
@@ -702,4 +677,3 @@ exports.deleteRoute = async (req, res) => {
     });
   }
 };
-

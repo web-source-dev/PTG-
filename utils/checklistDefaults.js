@@ -8,7 +8,7 @@ const { ROUTE_STOP_TYPE } = require('../constants/status');
 
 /**
  * Get default checklist items for a stop type
- * @param {string} stopType - The type of stop (pickup, drop, break, rest)
+ * @param {string} stopType - The type of stop (pickup, drop, break, rest, fuel)
  * @returns {Array} Array of checklist items
  */
 const getDefaultChecklist = (stopType) => {
@@ -51,6 +51,17 @@ const getDefaultChecklist = (stopType) => {
         { item: 'Set parking brake', checked: false },
         { item: 'Secure vehicle load', checked: false },
         { item: 'Lock truck and trailer', checked: false },
+        { item: 'Verify truck and trailer are secure', checked: false }
+      ];
+
+    case ROUTE_STOP_TYPE.FUEL:
+      return [
+        { item: 'Park truck at fuel station safely', checked: false },
+        { item: 'Set parking brake', checked: false },
+        { item: 'Secure vehicle load', checked: false },
+        { item: 'Fuel truck to required level', checked: false },
+        { item: 'Check fuel levels and quality', checked: false },
+        { item: 'Record fuel purchase details', checked: false },
         { item: 'Verify truck and trailer are secure', checked: false }
       ];
 
