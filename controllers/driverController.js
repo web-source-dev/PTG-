@@ -462,6 +462,20 @@ exports.updateMyRoute = async (req, res) => {
                   }
                 }
               }
+
+              // Sync checklist to transport job
+              if ((updatedStop.stopType === 'pickup' || updatedStop.stopType === 'drop') && updatedStop.transportJobId && updatedStop.checklist) {
+                const jobId = typeof updatedStop.transportJobId === 'object'
+                  ? (updatedStop.transportJobId._id || updatedStop.transportJobId.id)
+                  : updatedStop.transportJobId;
+
+                if (jobId && Array.isArray(updatedStop.checklist)) {
+                  const checklistField = updatedStop.stopType === 'pickup' ? 'pickupChecklist' : 'deliveryChecklist';
+                  await TransportJob.findByIdAndUpdate(jobId, {
+                    [checklistField]: updatedStop.checklist
+                  });
+                }
+              }
           }
         }
 

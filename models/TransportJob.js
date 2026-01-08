@@ -66,6 +66,55 @@ const transportJobSchema = new mongoose.Schema({
     type: String,
     trim: true
   }],
+
+  // Checklists for pickup and delivery operations
+  pickupChecklist: [{
+    item: {
+      type: String,
+      trim: true,
+      required: true
+    },
+    checked: {
+      type: Boolean,
+      default: false
+    },
+    notes: {
+      type: String,
+      trim: true
+    },
+    completedAt: {
+      type: Date
+    },
+    completedLocation: {
+      latitude: Number,
+      longitude: Number,
+      accuracy: Number
+    }
+  }],
+  deliveryChecklist: [{
+    item: {
+      type: String,
+      trim: true,
+      required: true
+    },
+    checked: {
+      type: Boolean,
+      default: false
+    },
+    notes: {
+      type: String,
+      trim: true
+    },
+    completedAt: {
+      type: Date
+    },
+    completedLocation: {
+      latitude: Number,
+      longitude: Number,
+      accuracy: Number
+    }
+  }],
+
   // These arrays are kept for backward compatibility but should be populated by virtuals
   billOfLading: {
     type: String,

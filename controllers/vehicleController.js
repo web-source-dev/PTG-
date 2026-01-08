@@ -123,7 +123,13 @@ exports.getVehicleById = async (req, res) => {
   try {
     const vehicle = await Vehicle.findById(req.params.id)
       .populate('createdBy', 'firstName lastName email')
-      .populate('transportJobId');
+      .populate({
+        path: 'transportJobId',
+        populate: {
+          path: 'routeId',
+          select: 'routeNumber status driverId truckId'
+        }
+      });
 
     if (!vehicle) {
       return res.status(404).json({
@@ -132,9 +138,31 @@ exports.getVehicleById = async (req, res) => {
       });
     }
 
+    // If vehicle has a transport job, include the photos and checklists from it
+    let transportJobData = null;
+    if (vehicle.transportJobId) {
+      const TransportJob = require('../models/TransportJob');
+      const transportJob = await TransportJob.findById(vehicle.transportJobId._id)
+        .select('pickupPhotos deliveryPhotos pickupChecklist deliveryChecklist status');
+
+      if (transportJob) {
+        transportJobData = {
+          _id: transportJob._id,
+          pickupPhotos: transportJob.pickupPhotos || [],
+          deliveryPhotos: transportJob.deliveryPhotos || [],
+          pickupChecklist: transportJob.pickupChecklist || [],
+          deliveryChecklist: transportJob.deliveryChecklist || [],
+          status: transportJob.status
+        };
+      }
+    }
+
     res.status(200).json({
       success: true,
-      data: vehicle
+      data: {
+        vehicle,
+        transportJobData
+      }
     });
   } catch (error) {
     console.error('Error fetching vehicle:', error);
