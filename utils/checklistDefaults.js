@@ -13,6 +13,16 @@ const { ROUTE_STOP_TYPE } = require('../constants/status');
  */
 const getDefaultChecklist = (stopType) => {
   switch (stopType) {
+    case ROUTE_STOP_TYPE.START:
+      return [
+        { item: 'Verify truck is ready for departure', checked: false },
+        { item: 'Check all vehicle loads are secure', checked: false },
+        { item: 'Confirm route and stops are loaded on device', checked: false },
+        { item: 'Take initial truck condition photos', checked: false },
+        { item: 'Verify emergency kit and tools are present', checked: false },
+        { item: 'Check fuel levels and tire pressure', checked: false },
+        { item: 'Confirm all required documentation is present', checked: false }
+      ];
     case ROUTE_STOP_TYPE.PICKUP:
       return [
         { item: 'Verify vehicle VIN matches paperwork', checked: false },
@@ -63,6 +73,17 @@ const getDefaultChecklist = (stopType) => {
         { item: 'Check fuel levels and quality', checked: false },
         { item: 'Record fuel purchase details', checked: false },
         { item: 'Verify truck and trailer are secure', checked: false }
+      ];
+
+    case ROUTE_STOP_TYPE.END:
+      return [
+        { item: 'Park truck at final destination safely', checked: false },
+        { item: 'Set parking brake', checked: false },
+        { item: 'Secure all loads and equipment', checked: false },
+        { item: 'Complete final documentation', checked: false },
+        { item: 'Take final truck condition photos', checked: false },
+        { item: 'Report any issues or incidents', checked: false },
+        { item: 'Verify all stops completed successfully', checked: false }
       ];
 
     default:

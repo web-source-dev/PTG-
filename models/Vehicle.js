@@ -79,10 +79,6 @@ const vehicleSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
-  twicRequired: {
-    type: Boolean,
-    default: false
-  },
 
   // Drop Information
   dropDestinationType: {

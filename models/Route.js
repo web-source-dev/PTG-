@@ -96,7 +96,7 @@ const routeSchema = new mongoose.Schema({
     ref: 'TransportJob'
   }],
 
-  // Stops on this Route (pickup, drop, break, rest, fuel)
+  // Stops on this Route (start, pickup, drop, break, rest, fuel, end)
   stops: [{
     // Stop Type
     stopType: {
@@ -105,7 +105,7 @@ const routeSchema = new mongoose.Schema({
       required: true
     },
     
-    // Transport Job Reference (required for pickup and drop stops)
+    // Transport Job Reference (required for pickup and drop stops only)
     transportJobId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'TransportJob',

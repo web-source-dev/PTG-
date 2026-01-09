@@ -57,21 +57,15 @@ const VEHICLE_STATUS = {
   CANCELLED: 'Cancelled'
 };
 
-// Truck Capacity
-const TRUCK_CAPACITY = {
-  SINGLE: 'Single',
-  DOUBLE: 'Double',
-  TRIPLE: 'Triple',
-  QUAD: 'Quad'
-};
-
 // Route Stop Type
 const ROUTE_STOP_TYPE = {
+  START: 'start',
   PICKUP: 'pickup',
   DROP: 'drop',
   BREAK: 'break',
   REST: 'rest',
-  FUEL: 'fuel'
+  FUEL: 'fuel',
+  END: 'end'
 };
 
 // Carrier Types
@@ -104,11 +98,13 @@ const getAllStatusEnums = () => {
   routeStopType: {
     values: Object.values(ROUTE_STOP_TYPE),
     labels: {
+      [ROUTE_STOP_TYPE.START]: 'Start',
       [ROUTE_STOP_TYPE.PICKUP]: 'Pickup',
       [ROUTE_STOP_TYPE.DROP]: 'Drop',
       [ROUTE_STOP_TYPE.BREAK]: 'Break',
       [ROUTE_STOP_TYPE.REST]: 'Rest',
-      [ROUTE_STOP_TYPE.FUEL]: 'Fuel'
+      [ROUTE_STOP_TYPE.FUEL]: 'Fuel',
+      [ROUTE_STOP_TYPE.END]: 'End'
     }
   },
     transportJob: {
@@ -142,15 +138,6 @@ const getAllStatusEnums = () => {
         [VEHICLE_STATUS.CANCELLED]: 'Cancelled'
       }
     },
-    truckCapacity: {
-      values: Object.values(TRUCK_CAPACITY),
-      labels: {
-        [TRUCK_CAPACITY.SINGLE]: 'Single',
-        [TRUCK_CAPACITY.DOUBLE]: 'Double',
-        [TRUCK_CAPACITY.TRIPLE]: 'Triple',
-        [TRUCK_CAPACITY.QUAD]: 'Quad'
-      }
-    },
     routeStopType: {
       values: Object.values(ROUTE_STOP_TYPE),
       labels: {
@@ -177,7 +164,6 @@ module.exports = {
   TRANSPORT_JOB_STATUS,
   TRUCK_STATUS,
   VEHICLE_STATUS,
-  TRUCK_CAPACITY,
   ROUTE_STOP_TYPE,
   CARRIER,
   getAllStatusEnums

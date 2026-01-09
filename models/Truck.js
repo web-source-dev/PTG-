@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { TRUCK_STATUS, TRUCK_CAPACITY } = require('../constants/status');
+const { TRUCK_STATUS } = require('../constants/status');
 
 const truckSchema = new mongoose.Schema({
   // Truck Identification
@@ -23,11 +23,11 @@ const truckSchema = new mongoose.Schema({
     type: Number
   },
 
-  // Capacity Information
-  capacity: {
-    type: String,
-    enum: Object.values(TRUCK_CAPACITY),
-    default: TRUCK_CAPACITY.SINGLE
+  // Load Capacity (in lbs)
+  loadCapacity: {
+    type: Number,
+    min: 0,
+    required: true
   },
 
   // Status
@@ -41,22 +41,6 @@ const truckSchema = new mongoose.Schema({
   currentDriver: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  },
-
-  // Verizon Connect Integration
-  verizonConnectDeviceId: {
-    type: String,
-    trim: true
-  },
-  verizonConnectVehicleId: {
-    type: String,
-    trim: true
-  },
-  lastKnownLocation: {
-    latitude: Number,
-    longitude: Number,
-    timestamp: Date,
-    address: String
   },
 
   // Notes
