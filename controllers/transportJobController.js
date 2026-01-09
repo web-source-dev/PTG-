@@ -93,7 +93,7 @@ exports.getAllTransportJobs = async (req, res) => {
 
     const transportJobs = await TransportJob.find(query)
       .sort({ createdAt: -1 })
-      .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupContactName pickupContactPhone dropLocationName dropCity dropState dropZip dropContactName dropContactPhone')
+      .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd pickupContactName pickupContactPhone dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd dropContactName dropContactPhone availableToShipDate')
       .populate({
         path: 'routeId',
         select: 'routeNumber status',
