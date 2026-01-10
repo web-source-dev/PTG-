@@ -65,21 +65,6 @@ const login = async (req, res) => {
     // Check if user exists and get password field
     const user = await User.findOne({ email }).select('+password');
     if (!user) {
-      // Log failed login attempt for non-existent user
-      await AuditLog.create({
-        action: 'user_login_failed',
-        entityType: 'user',
-        entityId: null, // No entity ID for non-existent user
-        userId: null, // No user ID for non-existent user
-        driverId: null,
-        details: {
-          email,
-          reason: 'user_not_found',
-          ip: req.ip,
-          userAgent: req.get('User-Agent')
-        },
-        notes: `Failed login attempt for non-existent user ${email}`
-      });
 
       return res.status(401).json({
         success: false,

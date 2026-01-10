@@ -3,7 +3,6 @@ const mongoose = require('mongoose');
 const auditLogSchema = new mongoose.Schema({
   action: {
     type: String,
-    required: true,
     enum: [
       // Route actions
       'start_route', 'stop_route', 'resume_route', 'complete_route', 'create_route', 'update_route', 'delete_route',
@@ -31,23 +30,17 @@ const auditLogSchema = new mongoose.Schema({
 
   entityType: {
     type: String,
-    required: true,
     enum: ['route', 'transportJob', 'vehicle', 'truck', 'expense', 'user', 'file', 'location', 'calendarEvent']
   },
 
   entityId: {
     type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
-    required: function() {
-      // Not required for actions that don't have a specific entity (like bulk operations)
-      return !['user_login', 'user_login_failed', 'get_all_drivers_locations'].includes(this.action);
-    }
   },
 
   // User who performed the action (required)
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true
   },
 
   // Driver affected by the action (optional - for driver-specific actions)
