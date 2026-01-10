@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Vehicle = require('../models/Vehicle');
 const TransportJob = require('../models/TransportJob');
 const AuditLog = require('../models/AuditLog');
@@ -222,12 +223,13 @@ exports.updateVehicle = async (req, res) => {
     ).populate('createdBy', 'firstName lastName email')
      .populate('transportJobId');
 
-    // Log vehicle update
+    // Log vehicle update (only if user ID is valid ObjectId)
+    const isValidObjectId = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id);
     await AuditLog.create({
       action: 'update_vehicle',
       entityType: 'vehicle',
       entityId: vehicleId,
-      userId: req.user._id,
+      userId: isValidObjectId ? req.user._id : null,
       driverId: undefined, // Vehicles don't have drivers assigned directly
       details: updateData,
       notes: `Updated vehicle ${vehicle?.vin || vehicleId}`
@@ -270,12 +272,13 @@ exports.deleteVehicle = async (req, res) => {
       });
     }
 
-    // Log vehicle deletion
+    // Log vehicle deletion (only if user ID is valid ObjectId)
+    const isValidObjectId = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id);
     await AuditLog.create({
       action: 'delete_vehicle',
       entityType: 'vehicle',
       entityId: vehicleId,
-      userId: req.user._id,
+      userId: isValidObjectId ? req.user._id : null,
       driverId: undefined, // Vehicles don't have drivers assigned directly
       details: {
         vin: vehicle.vin,

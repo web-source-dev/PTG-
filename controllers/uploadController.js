@@ -1,5 +1,5 @@
+const mongoose = require('mongoose');
 const { uploadFromBase64, deleteImage } = require('../config/cloudinary');
-const { protect } = require('../middleware/auth');
 const AuditLog = require('../models/AuditLog');
 
 /**
@@ -58,13 +58,14 @@ exports.uploadImage = async (req, res) => {
       }
     });
 
-    // Log file upload
+    // Log file upload (only if user ID is valid ObjectId)
+    const isValidObjectId = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id);
     await AuditLog.create({
       action: 'upload_file',
       entityType: 'file',
       entityId: result.public_id,
-      userId: req.user._id,
-      driverId: req.user.role === 'ptgDriver' ? req.user._id : undefined,
+      userId: isValidObjectId ? req.user._id : null,
+      driverId: (isValidObjectId && req.user.role === 'ptgDriver') ? req.user._id : undefined,
       details: {
         publicId: result.public_id,
         url: result.url,
@@ -143,15 +144,16 @@ exports.uploadImages = async (req, res) => {
 
     const results = await Promise.all(uploadPromises);
 
-    // Log multiple file uploads
+    // Log multiple file uploads (only if user ID is valid ObjectId)
+    const isValidObjectId = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id);
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
       await AuditLog.create({
         action: 'upload_file',
         entityType: 'file',
         entityId: result.public_id,
-        userId: req.user._id,
-        driverId: req.user.role === 'ptgDriver' ? req.user._id : undefined,
+        userId: isValidObjectId ? req.user._id : null,
+        driverId: (isValidObjectId && req.user.role === 'ptgDriver') ? req.user._id : undefined,
         details: {
           publicId: result.public_id,
           url: result.url,
@@ -205,13 +207,14 @@ exports.deleteImage = async (req, res) => {
 
     const result = await deleteImage(publicId);
 
-    // Log file deletion
+    // Log file deletion (only if user ID is valid ObjectId)
+    const isValidObjectId = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id);
     await AuditLog.create({
       action: 'delete_file',
       entityType: 'file',
       entityId: publicId,
-      userId: req.user._id,
-      driverId: req.user.role === 'ptgDriver' ? req.user._id : undefined,
+      userId: isValidObjectId ? req.user._id : null,
+      driverId: (isValidObjectId && req.user.role === 'ptgDriver') ? req.user._id : undefined,
       details: {
         publicId,
         result

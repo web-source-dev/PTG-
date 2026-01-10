@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const uploadController = require('../controllers/uploadController');
-const { protect } = require('../middleware/auth');
+const { optionalAuth } = require('../middleware/auth');
 
-// All upload routes require authentication
-router.use(protect);
+// Apply optional auth for API key authentication from VOS
+router.use(optionalAuth);
 
 // POST /api/upload/image - Upload single image from base64
 router.post('/image', uploadController.uploadImage);
