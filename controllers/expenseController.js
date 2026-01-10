@@ -12,7 +12,7 @@ const routeTracker = require('../utils/routeTracker');
  */
 exports.createFuelExpense = async (req, res) => {
   try {
-    const { driverId, routeId, ...expenseData } = req.body;
+    const { driverId, routeId, backgroundLocation, askedLocation, ...expenseData } = req.body;
 
     // Create expense directly
     const expense = await Expense.create({
@@ -21,7 +21,24 @@ exports.createFuelExpense = async (req, res) => {
       pricePerGallon: parseFloat(expenseData.pricePerGallon),
       totalCost: parseFloat(expenseData.totalCost),
       odometerReading: parseFloat(expenseData.odometerReading),
-      location: expenseData.location,
+      backgroundLocation: backgroundLocation ? {
+        latitude: parseFloat(backgroundLocation.latitude),
+        longitude: parseFloat(backgroundLocation.longitude),
+        accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
+      } : undefined,
+      askedLocation: askedLocation ? {
+        latitude: parseFloat(askedLocation.latitude),
+        longitude: parseFloat(askedLocation.longitude),
+        accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
+        // Save text fields for the location the user typed/selected
+        formattedAddress: askedLocation.formattedAddress || undefined,
+        name: askedLocation.name || undefined,
+        address: askedLocation.address || undefined,
+        city: askedLocation.city || undefined,
+        state: askedLocation.state || undefined,
+        zipCode: askedLocation.zipCode || undefined,
+        placeId: askedLocation.placeId || undefined
+      } : undefined,
       routeId,
       driverId,
       truckId: expenseData.truckId,
@@ -35,21 +52,24 @@ exports.createFuelExpense = async (req, res) => {
       entityId: expense._id,
       userId: req.user._id,
       driverId: driverId,
-      location: expenseData.location,
+      location: askedLocation || backgroundLocation,
       routeId,
       details: {
         gallons: parseFloat(expenseData.gallons),
         pricePerGallon: parseFloat(expenseData.pricePerGallon),
         totalCost: parseFloat(expenseData.totalCost),
         odometerReading: parseFloat(expenseData.odometerReading),
-        truckId: expenseData.truckId
+        truckId: expenseData.truckId,
+        backgroundLocation: backgroundLocation ? { latitude: backgroundLocation.latitude, longitude: backgroundLocation.longitude } : undefined,
+        askedLocation: askedLocation ? { latitude: askedLocation.latitude, longitude: askedLocation.longitude } : undefined
       },
       notes: `Added fuel expense: ${expenseData.gallons} gallons for $${expenseData.totalCost}`
     });
 
-    // Add to route tracking if routeId provided
+    // Add to route tracking if routeId provided (use askedLocation if available, otherwise backgroundLocation)
     if (routeId) {
-      await routeTracker.addActionEntry(routeId, 'add_fuel_expense', expenseData.location, auditLog._id, {
+      const locationForTracking = askedLocation || backgroundLocation;
+      await routeTracker.addActionEntry(routeId, 'add_fuel_expense', locationForTracking, auditLog._id, {
         expenseId: expense._id,
         gallons: parseFloat(expenseData.gallons),
         totalCost: parseFloat(expenseData.totalCost)
@@ -75,7 +95,7 @@ exports.createFuelExpense = async (req, res) => {
  */
 exports.createMaintenanceExpense = async (req, res) => {
   try {
-    const { driverId, routeId, ...expenseData } = req.body;
+    const { driverId, routeId, backgroundLocation, askedLocation, ...expenseData } = req.body;
 
     // Create expense directly
     const expense = await Expense.create({
@@ -83,7 +103,24 @@ exports.createMaintenanceExpense = async (req, res) => {
       description: expenseData.description,
       totalCost: parseFloat(expenseData.cost),
       odometerReading: parseFloat(expenseData.odometerReading),
-      location: expenseData.location,
+      backgroundLocation: backgroundLocation ? {
+        latitude: parseFloat(backgroundLocation.latitude),
+        longitude: parseFloat(backgroundLocation.longitude),
+        accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
+      } : undefined,
+      askedLocation: askedLocation ? {
+        latitude: parseFloat(askedLocation.latitude),
+        longitude: parseFloat(askedLocation.longitude),
+        accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
+        // Save text fields for the location the user typed/selected
+        formattedAddress: askedLocation.formattedAddress || undefined,
+        name: askedLocation.name || undefined,
+        address: askedLocation.address || undefined,
+        city: askedLocation.city || undefined,
+        state: askedLocation.state || undefined,
+        zipCode: askedLocation.zipCode || undefined,
+        placeId: askedLocation.placeId || undefined
+      } : undefined,
       routeId,
       driverId,
       truckId: expenseData.truckId,
@@ -97,20 +134,23 @@ exports.createMaintenanceExpense = async (req, res) => {
       entityId: expense._id,
       userId: req.user._id,
       driverId: driverId,
-      location: expenseData.location,
+      location: askedLocation || backgroundLocation,
       routeId,
       details: {
         description: expenseData.description,
         cost: parseFloat(expenseData.cost),
         odometerReading: parseFloat(expenseData.odometerReading),
-        truckId: expenseData.truckId
+        truckId: expenseData.truckId,
+        backgroundLocation: backgroundLocation ? { latitude: backgroundLocation.latitude, longitude: backgroundLocation.longitude } : undefined,
+        askedLocation: askedLocation ? { latitude: askedLocation.latitude, longitude: askedLocation.longitude } : undefined
       },
       notes: `Added maintenance expense: ${expenseData.description} for $${expenseData.cost}`
     });
 
-    // Add to route tracking if routeId provided
+    // Add to route tracking if routeId provided (use askedLocation if available, otherwise backgroundLocation)
     if (routeId) {
-      await routeTracker.addActionEntry(routeId, 'add_maintenance_expense', expenseData.location, auditLog._id, {
+      const locationForTracking = askedLocation || backgroundLocation;
+      await routeTracker.addActionEntry(routeId, 'add_maintenance_expense', locationForTracking, auditLog._id, {
         expenseId: expense._id,
         description: expenseData.description,
         cost: parseFloat(expenseData.cost)

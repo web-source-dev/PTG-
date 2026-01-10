@@ -4,6 +4,7 @@ const Truck = require('../models/Truck');
 const User = require('../models/User');
 const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
+const CalendarEvent = require('../models/CalendarEvent');
 const locationService = require('../utils/locationService');
 const {
   updateStatusOnRouteCreate,
@@ -148,6 +149,55 @@ exports.createRoute = async (req, res) => {
       routeData.selectedTransportJobs,
       routeData.truckId
     );
+
+    // Create calendar event for this route
+    try {
+      const driver = await User.findById(routeData.driverId);
+      const driverName = driver ? `${driver.firstName || ''} ${driver.lastName || ''}`.trim() : 'Driver';
+      const driverEmail = driver?.email || '';
+      const truck = await Truck.findById(routeData.truckId);
+      const truckNumber = truck?.truckNumber || truck?.licensePlate || 'Truck';
+      const truckMake = truck?.make || '';
+      const truckModel = truck?.model || '';
+      const truckYear = truck?.year || '';
+      const truckDetails = [truckMake, truckModel, truckYear].filter(Boolean).join(' ') || 'Truck';
+      const routeNumber = route.routeNumber || route._id;
+
+      const description = `${truckNumber} - ${driverName}${driverEmail ? ` (${driverEmail})` : ''} - ${truckDetails} - Route ${routeNumber}`;
+
+      const calendarEvent = await CalendarEvent.create({
+        title: `Route ${routeNumber}`,
+        description: description,
+        startDate: routeData.plannedStartDate,
+        endDate: routeData.plannedEndDate,
+        allDay: false,
+        color: 'blue',
+        driverId: routeData.driverId,
+        routeId: route._id,
+        truckId: routeData.truckId,
+        createdBy: req.user._id,
+        status: 'active'
+      });
+
+      // Log calendar event creation
+      await AuditLog.create({
+        action: 'create_calendar_event',
+        entityType: 'calendarEvent',
+        entityId: calendarEvent._id,
+        userId: req.user._id,
+        driverId: routeData.driverId,
+        details: {
+          title: calendarEvent.title,
+          startDate: calendarEvent.startDate,
+          endDate: calendarEvent.endDate,
+          routeId: route._id
+        },
+        notes: `Auto-created calendar event for route ${route.routeNumber || route._id}`
+      });
+    } catch (calendarError) {
+      console.error('Error creating calendar event for route:', calendarError);
+      // Don't fail route creation if calendar event creation fails
+    }
 
     // Calculate and save route distances
     try {
@@ -463,6 +513,131 @@ exports.updateRoute = async (req, res) => {
       notes: `Updated route ${route.routeNumber || req.params.id}`
     });
 
+    // Update or create calendar event for this route
+    try {
+      const existingCalendarEvent = await CalendarEvent.findOne({ routeId: route._id });
+      
+      // Determine what fields to update
+      const calendarUpdateData = {};
+      // Use updatedRoute if available, otherwise use updateData or route
+      const finalRoute = updatedRoute || route;
+      if (updateData.plannedStartDate !== undefined) {
+        calendarUpdateData.startDate = updateData.plannedStartDate;
+      } else if (updatedRoute && updatedRoute.plannedStartDate) {
+        calendarUpdateData.startDate = updatedRoute.plannedStartDate;
+      }
+      if (updateData.plannedEndDate !== undefined) {
+        calendarUpdateData.endDate = updateData.plannedEndDate;
+      } else if (updatedRoute && updatedRoute.plannedEndDate) {
+        calendarUpdateData.endDate = updatedRoute.plannedEndDate;
+      }
+      if (updateData.driverId !== undefined) {
+        calendarUpdateData.driverId = updateData.driverId;
+      }
+      if (updateData.truckId !== undefined) {
+        calendarUpdateData.truckId = updateData.truckId;
+      }
+      if (updateData.status === 'Cancelled') {
+        calendarUpdateData.status = 'cancelled';
+      } else if (updateData.status && existingCalendarEvent && existingCalendarEvent.status === 'cancelled') {
+        calendarUpdateData.status = 'active';
+      }
+
+      // Update route number in title if route number changed
+      if (updateData.routeNumber !== undefined || (updatedRoute && updatedRoute.routeNumber)) {
+        const routeNumber = (updatedRoute && updatedRoute.routeNumber) || route.routeNumber;
+        calendarUpdateData.title = `Route ${routeNumber || route._id}`;
+      }
+
+      // Update description if driver or truck changed
+      if (updateData.driverId !== undefined || updateData.truckId !== undefined) {
+        const driverId = updateData.driverId || route.driverId;
+        const truckId = updateData.truckId || route.truckId;
+        const driver = await User.findById(driverId);
+        const truck = await Truck.findById(truckId);
+        const driverName = driver ? `${driver.firstName || ''} ${driver.lastName || ''}`.trim() : 'Driver';
+        const driverEmail = driver?.email || '';
+        const truckNumber = truck?.truckNumber || truck?.licensePlate || 'Truck';
+        const truckMake = truck?.make || '';
+        const truckModel = truck?.model || '';
+        const truckYear = truck?.year || '';
+        const truckDetails = [truckMake, truckModel, truckYear].filter(Boolean).join(' ') || 'Truck';
+        const routeNumber = (updatedRoute && updatedRoute.routeNumber) || route.routeNumber || route._id;
+        
+        calendarUpdateData.description = `${truckNumber} - ${driverName}${driverEmail ? ` (${driverEmail})` : ''} - ${truckDetails} - Route ${routeNumber}`;
+      }
+
+      if (existingCalendarEvent) {
+        // Update existing calendar event
+        if (Object.keys(calendarUpdateData).length > 0) {
+          await CalendarEvent.findByIdAndUpdate(
+            existingCalendarEvent._id,
+            calendarUpdateData,
+            { new: true }
+          );
+
+          // Log calendar event update
+          await AuditLog.create({
+            action: 'update_calendar_event',
+            entityType: 'calendarEvent',
+            entityId: existingCalendarEvent._id,
+            userId: req.user._id,
+            driverId: route.driverId,
+            details: calendarUpdateData,
+            notes: `Auto-updated calendar event for route ${route.routeNumber || req.params.id}`
+          });
+        }
+      } else {
+        // Create new calendar event if it doesn't exist
+        const finalRoute = updatedRoute || route;
+        const driver = await User.findById(finalRoute.driverId);
+        const truck = await Truck.findById(finalRoute.truckId);
+        const driverName = driver ? `${driver.firstName || ''} ${driver.lastName || ''}`.trim() : 'Driver';
+        const driverEmail = driver?.email || '';
+        const truckNumber = truck?.truckNumber || truck?.licensePlate || 'Truck';
+        const truckMake = truck?.make || '';
+        const truckModel = truck?.model || '';
+        const truckYear = truck?.year || '';
+        const truckDetails = [truckMake, truckModel, truckYear].filter(Boolean).join(' ') || 'Truck';
+        const routeNumber = finalRoute.routeNumber || finalRoute._id;
+
+        const description = `${truckNumber} - ${driverName}${driverEmail ? ` (${driverEmail})` : ''} - ${truckDetails} - Route ${routeNumber}`;
+
+        const calendarEvent = await CalendarEvent.create({
+          title: `Route ${routeNumber}`,
+          description: description,
+          startDate: finalRoute.plannedStartDate,
+          endDate: finalRoute.plannedEndDate,
+          allDay: false,
+          color: 'blue',
+          driverId: finalRoute.driverId,
+          routeId: finalRoute._id,
+          truckId: finalRoute.truckId,
+          createdBy: req.user._id,
+          status: finalRoute.status === 'Cancelled' ? 'cancelled' : 'active'
+        });
+
+        // Log calendar event creation
+        await AuditLog.create({
+          action: 'create_calendar_event',
+          entityType: 'calendarEvent',
+          entityId: calendarEvent._id,
+          userId: req.user._id,
+          driverId: finalRoute.driverId,
+          details: {
+            title: calendarEvent.title,
+            startDate: calendarEvent.startDate,
+            endDate: calendarEvent.endDate,
+            routeId: finalRoute._id
+          },
+          notes: `Auto-created calendar event for route ${finalRoute.routeNumber || finalRoute._id}`
+        });
+      }
+    } catch (calendarError) {
+      console.error('Error updating/creating calendar event for route:', calendarError);
+      // Don't fail route update if calendar event update fails
+    }
+
     // If stops were updated, recalculate distances and coordinates
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
       console.log('🔄 Recalculating distances for updated route:', updatedRoute._id);
@@ -713,6 +888,33 @@ exports.deleteRoute = async (req, res) => {
       },
       notes: `Deleted route ${route.routeNumber || req.params.id}`
     });
+
+    // Cancel or delete associated calendar event
+    try {
+      const calendarEvent = await CalendarEvent.findOne({ routeId: route._id });
+      if (calendarEvent) {
+        // Cancel the calendar event instead of deleting to preserve history
+        await CalendarEvent.findByIdAndUpdate(calendarEvent._id, {
+          status: 'cancelled'
+        });
+
+        // Log calendar event cancellation
+        await AuditLog.create({
+          action: 'update_calendar_event',
+          entityType: 'calendarEvent',
+          entityId: calendarEvent._id,
+          userId: req.user._id,
+          driverId: route.driverId,
+          details: {
+            status: 'cancelled'
+          },
+          notes: `Auto-cancelled calendar event for deleted route ${route.routeNumber || req.params.id}`
+        });
+      }
+    } catch (calendarError) {
+      console.error('Error cancelling calendar event for route:', calendarError);
+      // Don't fail route deletion if calendar event update fails
+    }
 
     // Delete route
     await Route.findByIdAndDelete(req.params.id);

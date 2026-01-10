@@ -17,7 +17,8 @@ class ExpenseService {
       totalCost,
       odometerReading,
       truckId,
-      location
+      backgroundLocation,
+      askedLocation
     } = expenseData;
 
     // Validation
@@ -32,7 +33,24 @@ class ExpenseService {
       pricePerGallon: parseFloat(pricePerGallon),
       totalCost: parseFloat(totalCost),
       odometerReading: parseFloat(odometerReading),
-      location,
+      backgroundLocation: backgroundLocation ? {
+        latitude: parseFloat(backgroundLocation.latitude),
+        longitude: parseFloat(backgroundLocation.longitude),
+        accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
+      } : undefined,
+      askedLocation: askedLocation ? {
+        latitude: parseFloat(askedLocation.latitude),
+        longitude: parseFloat(askedLocation.longitude),
+        accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
+        // Save text fields for the location the user typed/selected
+        formattedAddress: askedLocation.formattedAddress || undefined,
+        name: askedLocation.name || undefined,
+        address: askedLocation.address || undefined,
+        city: askedLocation.city || undefined,
+        state: askedLocation.state || undefined,
+        zipCode: askedLocation.zipCode || undefined,
+        placeId: askedLocation.placeId || undefined
+      } : undefined,
       routeId,
       driverId,
       truckId,
@@ -45,7 +63,7 @@ class ExpenseService {
       entityType: 'expense',
       entityId: expense._id,
       driverId,
-      location,
+      location: askedLocation || backgroundLocation,
       routeId,
       details: {
         gallons: parseFloat(gallons),
@@ -67,7 +85,8 @@ class ExpenseService {
       cost,
       odometerReading,
       truckId,
-      location
+      backgroundLocation,
+      askedLocation
     } = expenseData;
 
     // Validation
@@ -81,7 +100,24 @@ class ExpenseService {
       description,
       totalCost: parseFloat(cost),
       odometerReading: parseFloat(odometerReading),
-      location,
+      backgroundLocation: backgroundLocation ? {
+        latitude: parseFloat(backgroundLocation.latitude),
+        longitude: parseFloat(backgroundLocation.longitude),
+        accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
+      } : undefined,
+      askedLocation: askedLocation ? {
+        latitude: parseFloat(askedLocation.latitude),
+        longitude: parseFloat(askedLocation.longitude),
+        accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
+        // Save text fields for the location the user typed/selected
+        formattedAddress: askedLocation.formattedAddress || undefined,
+        name: askedLocation.name || undefined,
+        address: askedLocation.address || undefined,
+        city: askedLocation.city || undefined,
+        state: askedLocation.state || undefined,
+        zipCode: askedLocation.zipCode || undefined,
+        placeId: askedLocation.placeId || undefined
+      } : undefined,
       routeId,
       driverId,
       truckId,

@@ -7,6 +7,20 @@ const expenseSchema = new mongoose.Schema({
     required: true
   },
 
+  category: {
+    type: String,
+    enum: [
+      'diesel',
+      'petrol',
+      'oil_change',
+      'repair',
+      'tires',
+      'service',
+      'other'
+    ],
+    default: 'other'
+  },
+
   // Amount details
   gallons: Number, // For fuel expenses
   pricePerGallon: Number, // For fuel expenses
@@ -17,13 +31,35 @@ const expenseSchema = new mongoose.Schema({
 
   // Maintenance details
   description: String, // For maintenance expenses
+  serviceProvider: {
+    name: String,
+    phone: String,
+    address: String
+  },
+
+  // Odometer reading for fuel expenses and maintenance expenses to track mileage
   odometerReading: Number,
 
-  // Location data
-  location: {
+  // Location data when the expense was created it auto sets from the background location for verify manual location
+  backgroundLocation: {
     latitude: Number,
     longitude: Number,
     accuracy: Number
+  },
+
+  // they enter the location manually when they are at the location of the expense and they can verify the location with the background location manually
+  askedLocation: {
+    latitude: Number,
+    longitude: Number,
+    accuracy: Number,
+    // Text fields for the location the user typed/selected
+    formattedAddress: String,
+    name: String,
+    address: String,
+    city: String,
+    state: String,
+    zipCode: String,
+    placeId: String
   },
 
   // References
