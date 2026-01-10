@@ -19,6 +19,8 @@ const corsOptions = {
     'http://localhost:3000',
     'http://localhost:3001',
     'http://192.168.1.3:3000',
+    'https://dashboard.premiumtransportgroup.com',
+    'https://premiumtransportgroup.com',
     'https://shawnee-audible-mariann.ngrok-free.dev',
     'http://192.168.1.3:8000',
     'http://192.168.1.3:3001',
