@@ -194,6 +194,11 @@ const vehicleSchema = new mongoose.Schema({
     type: String,
     default: 'PTG'
   },
+  // Notes section
+  notes: {
+    type: String,
+    trim: true
+  },
 }, {
   timestamps: true
 });
