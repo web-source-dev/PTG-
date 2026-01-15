@@ -66,9 +66,43 @@ const uploadFromBase64 = async (base64String, folder = 'vos-ptg', options = {}) 
     const isPdf = mimeType === 'application/pdf';
     const resourceType = isPdf ? 'raw' : (isImage ? 'image' : 'auto');
 
+    // Extract filename from options context and ensure proper extension
+    let publicId = null;
+    if (options.context && options.context.file_name) {
+      const fileName = options.context.file_name;
+      // Get extension from original filename
+      const extensionMatch = fileName.match(/\.[^/.]+$/);
+      const extension = extensionMatch ? extensionMatch[0] : '';
+      
+      // Remove extension to get base name
+      const nameWithoutExt = fileName.replace(/\.[^/.]+$/, '');
+      
+      // For PDFs, always ensure .pdf extension
+      if (isPdf) {
+        const pdfExt = extension.toLowerCase() === '.pdf' ? extension : '.pdf';
+        // Use timestamp to ensure uniqueness while preserving filename
+        const timestamp = Date.now();
+        publicId = `${folder}/${nameWithoutExt}_${timestamp}${pdfExt}`;
+      } else if (isImage && extension) {
+        // For images, preserve original extension
+        const timestamp = Date.now();
+        publicId = `${folder}/${nameWithoutExt}_${timestamp}${extension}`;
+      } else if (isImage) {
+        // If no extension for image, add based on mime type
+        const imgExt = mimeType === 'image/png' ? '.png' : 
+                      mimeType === 'image/gif' ? '.gif' : 
+                      mimeType === 'image/webp' ? '.webp' : '.jpg';
+        const timestamp = Date.now();
+        publicId = `${folder}/${nameWithoutExt}_${timestamp}${imgExt}`;
+      }
+    }
+
     const uploadOptions = {
       folder: folder,
       resource_type: resourceType,
+      // Add public_id with extension to preserve filename (especially for PDFs)
+      // The public_id with .pdf extension ensures Cloudinary preserves it
+      ...(publicId ? { public_id: publicId } : {}),
       ...(isImage ? {
         transformation: [
           {
@@ -89,8 +123,21 @@ const uploadFromBase64 = async (base64String, folder = 'vos-ptg', options = {}) 
 
     const result = await cloudinary.uploader.upload(dataUrl, uploadOptions);
 
+    // For PDFs, ensure the URL includes the .pdf extension
+    // Cloudinary sometimes strips extensions from raw file URLs, so we need to add it back
+    let finalUrl = result.secure_url;
+    if (isPdf) {
+      // Check if URL already has .pdf extension
+      const urlWithoutParams = finalUrl.split('?')[0];
+      if (!urlWithoutParams.toLowerCase().endsWith('.pdf')) {
+        // Insert .pdf before any query parameters or fragments
+        const urlParts = finalUrl.split('?');
+        finalUrl = urlParts[0] + '.pdf' + (urlParts[1] ? '?' + urlParts[1] : '');
+      }
+    }
+
     return {
-      url: result.secure_url,
+      url: finalUrl,
       public_id: result.public_id,
       width: result.width || null,
       height: result.height || null,
