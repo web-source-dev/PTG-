@@ -199,6 +199,12 @@ const vehicleSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  // Delivery Priority
+  deliveryPriority: {
+    type: String,
+    enum: ['Low', 'Normal', 'High', 'Urgent'],
+    default: 'Normal'
+  },
 }, {
   timestamps: true
 });

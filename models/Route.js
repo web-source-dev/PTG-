@@ -194,6 +194,26 @@ const routeSchema = new mongoose.Schema({
         type: String,
         enum: ['vehicle', 'stop'],
         default: 'stop'
+      },
+      photoCategory: {
+        type: String,
+        enum: [
+          'vehicle-front-upper',
+          'vehicle-front-lower',
+          'vehicle-side-upper',
+          'vehicle-side-lower',
+          'vehicle-rear-driver-side-upper',
+          'vehicle-rear-driver-side-lower',
+          'vehicle-rear-passenger-side-upper',
+          'vehicle-rear-passenger-side-lower',
+          'engine',
+          'vehicle-roof',
+          'vehicle-bottom',
+          'interior-dashboard',
+          'interior-front',
+          'interior-rear',
+          'mirrors'
+        ]
       }
     }],
 
