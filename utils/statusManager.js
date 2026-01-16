@@ -9,6 +9,7 @@ const Vehicle = require('../models/Vehicle');
 const TransportJob = require('../models/TransportJob');
 const Route = require('../models/Route');
 const Truck = require('../models/Truck');
+const User = require('../models/User');
 const {
   VEHICLE_STATUS,
   TRANSPORT_JOB_STATUS,
@@ -53,6 +54,8 @@ const updateStatusOnTransportJobCreate = async (transportJobId, vehicleId) => {
 
 /**
  * Update statuses when route is created
+ * NOTE: Only sets route status to "Planned". Does NOT update truck, transport jobs, or vehicles.
+ * Those are updated when stops are saved (updateStatusOnStopsSetup) and when route starts (updateStatusOnRouteStatusChange).
  */
 const updateStatusOnRouteCreate = async (routeId, selectedTransportJobs, truckId) => {
   try {
@@ -63,31 +66,75 @@ const updateStatusOnRouteCreate = async (routeId, selectedTransportJobs, truckId
       await route.save();
     }
 
-    // Update transport jobs status to "Dispatched"
-    if (selectedTransportJobs && Array.isArray(selectedTransportJobs)) {
-      for (const jobId of selectedTransportJobs) {
-        await TransportJob.findByIdAndUpdate(jobId, {
-          status: TRANSPORT_JOB_STATUS.DISPATCHED
-        });
+    // DO NOT update transport jobs, vehicles, or truck status here
+    // Transport jobs and vehicles are updated when stops are saved (updateStatusOnStopsSetup)
+    // Truck is updated when route starts (updateStatusOnRouteStatusChange)
+  } catch (error) {
+    console.error('Error updating status on route create:', error);
+  }
+};
 
-        // Get transport job to find vehicle
-        const job = await TransportJob.findById(jobId).populate('vehicleId');
-        if (job && job.vehicleId) {
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: VEHICLE_STATUS.READY_FOR_TRANSPORT
-          });
+/**
+ * Update statuses when stops are saved (stops setup)
+ * This is called when transport jobs are added to route stops and saved
+ * @param {string} routeId - The route ID
+ * @param {Array} stops - Optional: The stops array to use (if not provided, will read from database)
+ */
+const updateStatusOnStopsSetup = async (routeId, stops = null) => {
+  try {
+    const route = await Route.findById(routeId);
+    if (!route) return;
+
+    // Use provided stops or read from route
+    const stopsToProcess = stops || route.stops;
+
+    // Get all transport jobs from stops
+    const transportJobIds = new Set();
+    
+    if (stopsToProcess && Array.isArray(stopsToProcess)) {
+      stopsToProcess.forEach(stop => {
+        if (stop.transportJobId) {
+          const jobId = typeof stop.transportJobId === 'object' 
+            ? (stop.transportJobId._id || stop.transportJobId.id) 
+            : stop.transportJobId;
+          if (jobId) transportJobIds.add(jobId.toString());
         }
+      });
+    }
+
+    // Also get from selectedTransportJobs if available
+    if (route.selectedTransportJobs && Array.isArray(route.selectedTransportJobs)) {
+      route.selectedTransportJobs.forEach(job => {
+        const jobId = typeof job === 'object' ? (job._id || job.id) : job;
+        if (jobId) transportJobIds.add(jobId.toString());
+      });
+    }
+
+    // Update transport jobs status to "Dispatched" and vehicles to "Ready for Transport"
+    for (const jobId of transportJobIds) {
+      await TransportJob.findByIdAndUpdate(jobId, {
+        status: TRANSPORT_JOB_STATUS.DISPATCHED
+      });
+
+      // Get transport job to find vehicle
+      const job = await TransportJob.findById(jobId).populate('vehicleId');
+      if (job && job.vehicleId) {
+        await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
+          status: VEHICLE_STATUS.READY_FOR_TRANSPORT
+        });
       }
     }
 
-    // Update truck status to "In Use"
-    if (truckId) {
-      await Truck.findByIdAndUpdate(truckId, {
-        status: TRUCK_STATUS.IN_USE
-      });
+    // Ensure route status is "Planned"
+    if (route.status !== ROUTE_STATUS.PLANNED) {
+      route.status = ROUTE_STATUS.PLANNED;
+      await route.save();
     }
+
+    // DO NOT update truck status - truck may be on another route and this is a future route
+    // Truck status will be updated to "In Use" when route starts
   } catch (error) {
-    console.error('Error updating status on route create:', error);
+    console.error('Error updating status on stops setup:', error);
   }
 };
 
@@ -125,21 +172,11 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
 
     // Update statuses based on route status
     if (newStatus === ROUTE_STATUS.IN_PROGRESS) {
-      // Route started - update transport jobs and vehicles
-      for (const jobId of transportJobIds) {
-        await TransportJob.findByIdAndUpdate(jobId, {
-          status: TRANSPORT_JOB_STATUS.IN_TRANSIT
-        });
-
-        const job = await TransportJob.findById(jobId).populate('vehicleId');
-        if (job && job.vehicleId) {
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: VEHICLE_STATUS.IN_TRANSPORT
-          });
-        }
-      }
-
-      // Update truck status
+      // Route started - update route to "In Progress", truck to "In Use"
+      // DO NOT update transport jobs or vehicles here - they remain "Dispatched" and "Ready for Transport"
+      // Transport jobs and vehicles are updated when pickup stops are completed
+      
+      // Update truck status to "In Use"
       if (route.truckId) {
         await Truck.findByIdAndUpdate(route.truckId._id || route.truckId, {
           status: TRUCK_STATUS.IN_USE
@@ -172,6 +209,16 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
         await Truck.findByIdAndUpdate(route.truckId._id || route.truckId, {
           status: TRUCK_STATUS.AVAILABLE,
           currentDriver: undefined
+        });
+      }
+
+      // Remove currentRouteId from driver profile
+      if (route.driverId) {
+        const driverId = typeof route.driverId === 'object' 
+          ? (route.driverId._id || route.driverId.id) 
+          : route.driverId;
+        await User.findByIdAndUpdate(driverId, {
+          $unset: { currentRouteId: 1 }
         });
       }
     } else if (newStatus === ROUTE_STATUS.CANCELLED) {
@@ -241,11 +288,16 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
       }
     }
 
-    // If stop is completed and it's a pickup stop, update vehicle status to "In Transport"
+    // If stop is completed and it's a pickup stop, update transport job to "In Transit" and vehicle to "In Transport"
     if (newStopStatus === ROUTE_STOP_STATUS.COMPLETED && stopType === 'pickup' && transportJobId) {
       const jobId = typeof transportJobId === 'object' 
         ? (transportJobId._id || transportJobId.id) 
         : transportJobId;
+
+      // Update transport job status to "In Transit"
+      await TransportJob.findByIdAndUpdate(jobId, {
+        status: TRANSPORT_JOB_STATUS.IN_TRANSIT
+      });
 
       const job = await TransportJob.findById(jobId).populate('vehicleId');
       if (job && job.vehicleId) {
@@ -274,6 +326,16 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
           await Truck.findByIdAndUpdate(route.truckId, {
             status: TRUCK_STATUS.AVAILABLE,
             currentDriver: undefined
+          });
+        }
+
+        // Remove currentRouteId from driver profile
+        if (route.driverId) {
+          const driverId = typeof route.driverId === 'object' 
+            ? (route.driverId._id || route.driverId.id) 
+            : route.driverId;
+          await User.findByIdAndUpdate(driverId, {
+            $unset: { currentRouteId: 1 }
           });
         }
 
@@ -471,6 +533,7 @@ module.exports = {
   updateVehicleOnCreate,
   updateStatusOnTransportJobCreate,
   updateStatusOnRouteCreate,
+  updateStatusOnStopsSetup,
   updateStatusOnRouteStatusChange,
   updateStatusOnStopUpdate,
   updateStatusOnTransportJobRemoved

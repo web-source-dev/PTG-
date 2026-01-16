@@ -5,6 +5,10 @@ const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const routeTracker = require('../utils/routeTracker');
 const { ROUTE_STATE, TRUCK_STATUS } = require('../constants/status');
+const {
+  updateStatusOnRouteStatusChange,
+  updateStatusOnStopUpdate
+} = require('../utils/statusManager');
 
 // Helper function to determine route action from status change
 const getRouteActionFromStatus = (newStatus, oldStatus) => {
@@ -625,6 +629,14 @@ exports.updateMyRoute = async (req, res) => {
 
       needsSave = true;
 
+      // Update all related statuses (transport jobs, vehicles) when route status changes
+      try {
+        await updateStatusOnRouteStatusChange(routeId, updateData.status, route.status);
+      } catch (statusError) {
+        console.error('Failed to update statuses on route status change:', statusError);
+        // Don't fail the route update if status updates fail
+      }
+
       // If route is being completed, update all related entities
       if (updateData.status === 'Completed') {
         try {
@@ -642,7 +654,7 @@ exports.updateMyRoute = async (req, res) => {
       await updatedRoute.save();
     }
 
-    // Handle stop updates after save
+    // Handle stop updates after save - update statuses for transport jobs and vehicles
     if (updateData.stops && Array.isArray(updateData.stops)) {
       const originalStops = route.stops || [];
       for (let index = 0; index < updateData.stops.length; index++) {
@@ -654,7 +666,21 @@ exports.updateMyRoute = async (req, res) => {
         });
 
         if (originalStop && updatedStop.status && updatedStop.status !== originalStop.status) {
-          // Stop status update handled inline - no additional function needed
+          // Update statuses when stop status changes (especially when completed)
+          try {
+            const stopType = updatedStop.stopType || originalStop.stopType;
+            const transportJobId = updatedStop.transportJobId || originalStop.transportJobId;
+            await updateStatusOnStopUpdate(
+              routeId,
+              index,
+              updatedStop.status,
+              stopType,
+              transportJobId
+            );
+          } catch (stopStatusError) {
+            console.error('Failed to update statuses on stop update:', stopStatusError);
+            // Don't fail the route update if stop status updates fail
+          }
         }
       }
     }
@@ -746,9 +772,24 @@ exports.updateMyRouteStop = async (req, res) => {
     await route.save();
 
     // Update statuses based on stop update (after save)
-    const stop = route.stops[stopIndex];
-    if (req.body.status && req.body.status !== stop.status) {
-      // Stop status update handled inline - no additional function needed
+    const originalStop = route.stops[stopIndex];
+    const newStopStatus = req.body.status;
+    if (newStopStatus && newStopStatus !== originalStop.status) {
+      // Update statuses when stop status changes (especially when completed)
+      try {
+        const stopType = originalStop.stopType;
+        const transportJobId = originalStop.transportJobId;
+        await updateStatusOnStopUpdate(
+          routeId,
+          stopIndex,
+          newStopStatus,
+          stopType,
+          transportJobId
+        );
+      } catch (stopStatusError) {
+        console.error('Failed to update statuses on stop update:', stopStatusError);
+        // Don't fail the route update if stop status updates fail
+      }
     }
 
     const updatedRoute = await Route.findById(routeId)

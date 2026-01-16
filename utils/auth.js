@@ -4,6 +4,8 @@ const emailService = require('./emailService');
 
 // Generate JWT token
 const generateToken = (user) => {
+  // Set token expiration to 1 month (30 days)
+  // Only logout when token expires or user clicks logout button
   return jwt.sign(
     {
       id: user._id,
@@ -11,7 +13,7 @@ const generateToken = (user) => {
     },
     process.env.JWT_SECRET,
     {
-      expiresIn: process.env.JWT_EXPIRE || '30d'
+      expiresIn: process.env.JWT_EXPIRE || '30d' // 30 days = 1 month
     }
   );
 };

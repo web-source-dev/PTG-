@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
 const Truck = require('../models/Truck');
@@ -6,10 +7,13 @@ const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
 const CalendarEvent = require('../models/CalendarEvent');
 const locationService = require('../utils/locationService');
+const { ROUTE_STATUS } = require('../constants/status');
 const {
   updateStatusOnRouteCreate,
+  updateStatusOnStopsSetup,
   updateStatusOnRouteStatusChange,
-  updateStatusOnTransportJobRemoved
+  updateStatusOnTransportJobRemoved,
+  updateStatusOnStopUpdate
 } = require('../utils/statusManager');
 
 /**
@@ -129,6 +133,7 @@ exports.createRoute = async (req, res) => {
     }
 
     // Also update based on stops that have transportJobId
+    // Sync selectedTransportJobs with transport jobs from stops
     if (routeData.stops && Array.isArray(routeData.stops)) {
       const jobIds = new Set();
       routeData.stops.forEach(stop => {
@@ -136,6 +141,14 @@ exports.createRoute = async (req, res) => {
           jobIds.add(stop.transportJobId.toString());
         }
       });
+      
+      // Update selectedTransportJobs to include all transport jobs from stops
+      if (jobIds.size > 0) {
+        routeData.selectedTransportJobs = Array.from(jobIds).map(id => new mongoose.Types.ObjectId(id));
+        route.selectedTransportJobs = routeData.selectedTransportJobs;
+        await route.save();
+      }
+      
       for (const jobId of jobIds) {
         await TransportJob.findByIdAndUpdate(jobId, {
           routeId: route._id
@@ -143,7 +156,9 @@ exports.createRoute = async (req, res) => {
       }
     }
 
-    // Update statuses: route to "Planned", transport jobs to "Dispatched", truck to "In Use"
+    // Update statuses: route to "Planned" only
+    // Transport jobs and vehicles will be updated when stops are saved (updateStatusOnStopsSetup)
+    // Truck will be updated when route starts (updateStatusOnRouteStatusChange)
     await updateStatusOnRouteCreate(
       route._id,
       routeData.selectedTransportJobs,
@@ -479,16 +494,58 @@ exports.updateRoute = async (req, res) => {
       });
 
       // Update transport job references from stops
+      // Also sync selectedTransportJobs to include all transport jobs from stops
       const jobIds = new Set();
       updateData.stops.forEach(stop => {
         if (stop.transportJobId) {
           jobIds.add(stop.transportJobId.toString());
         }
       });
+      
+      // Sync selectedTransportJobs with transport jobs from stops
+      if (jobIds.size > 0) {
+        updateData.selectedTransportJobs = Array.from(jobIds).map(id => new mongoose.Types.ObjectId(id));
+      } else {
+        // If no transport jobs in stops, clear selectedTransportJobs
+        updateData.selectedTransportJobs = [];
+      }
+      
       for (const jobId of jobIds) {
         await TransportJob.findByIdAndUpdate(jobId, {
           routeId: route._id
         });
+      }
+
+      // Note: Stops setup status update will be called AFTER route is saved
+      // This ensures we use the updated stops data
+
+      // Check for stop status changes and update related statuses
+      const originalStops = route.stops || [];
+      for (let index = 0; index < updateData.stops.length; index++) {
+        const updatedStop = updateData.stops[index];
+        const originalStop = originalStops.find(s => {
+          const origId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+          const updatedId = updatedStop._id ? updatedStop._id.toString() : (updatedStop.id ? updatedStop.id.toString() : null);
+          return origId && updatedId && origId === updatedId;
+        });
+
+        if (originalStop && updatedStop.status && updatedStop.status !== originalStop.status) {
+          // Update statuses when stop status changes (especially when completed)
+          try {
+            const stopType = updatedStop.stopType || originalStop.stopType;
+            const transportJobId = updatedStop.transportJobId || originalStop.transportJobId;
+            await updateStatusOnStopUpdate(
+              route._id,
+              index,
+              updatedStop.status,
+              stopType,
+              transportJobId
+            );
+          } catch (stopStatusError) {
+            console.error('Failed to update statuses on stop update:', stopStatusError);
+            // Don't fail the route update if stop status updates fail
+          }
+        }
       }
     }
 
@@ -501,6 +558,24 @@ exports.updateRoute = async (req, res) => {
         runValidators: true
       }
     );
+
+    // Check if stops are being added/updated (stops setup) - AFTER route is saved
+    // If stops have transportJobId and route is still "Planned", update transport jobs and vehicles
+    if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
+      const hasTransportJobStops = updateData.stops.some(stop => stop.transportJobId);
+      const isStopsSetup = hasTransportJobStops && (updatedRoute.status === ROUTE_STATUS.PLANNED || !updatedRoute.status);
+      
+      if (isStopsSetup) {
+        // This is stops setup - update transport jobs and vehicles to "Dispatched" and "Ready for Transport"
+        // Pass the stops array directly to ensure we use the updated data
+        try {
+          await updateStatusOnStopsSetup(route._id, updateData.stops);
+        } catch (stopsSetupError) {
+          console.error('Failed to update statuses on stops setup:', stopsSetupError);
+          // Don't fail the route update if stops setup status updates fail
+        }
+      }
+    }
 
     // Log route update
     await AuditLog.create({
@@ -688,6 +763,20 @@ exports.updateRoute = async (req, res) => {
 
         const savedRoute = await updatedRoute.save();
         console.log('✅ Route updated with recalculated distances, saved ID:', savedRoute._id);
+
+        // If this was a stops setup (route is "Planned" and has transport jobs in stops),
+        // ensure transport jobs are updated to "Dispatched" after final save
+        const hasTransportJobStops = savedRoute.stops && savedRoute.stops.some(stop => stop.transportJobId);
+        const isStopsSetup = hasTransportJobStops && (savedRoute.status === ROUTE_STATUS.PLANNED || !savedRoute.status);
+        
+        if (isStopsSetup) {
+          try {
+            await updateStatusOnStopsSetup(savedRoute._id, savedRoute.stops);
+          } catch (stopsSetupError) {
+            console.error('Failed to update statuses on stops setup after distance recalculation:', stopsSetupError);
+            // Don't fail the route update if stops setup status updates fail
+          }
+        }
 
         // Verify coordinates were saved
         const stopsWithCoords = savedRoute.stops.filter(s => s.location?.coordinates).length;

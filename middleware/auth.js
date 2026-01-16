@@ -28,15 +28,36 @@ const protect = async (req, res, next) => {
       if (!req.user) {
         return res.status(401).json({
           success: false,
-          message: 'User not found'
+          message: 'User not found',
+          code: 'USER_NOT_FOUND'
         });
       }
 
       next();
     } catch (error) {
+      // Check if token is expired
+      if (error.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          success: false,
+          message: 'Token expired',
+          code: 'TOKEN_EXPIRED'
+        });
+      }
+      
+      // Check if token is invalid
+      if (error.name === 'JsonWebTokenError' || error.name === 'NotBeforeError') {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid token',
+          code: 'TOKEN_INVALID'
+        });
+      }
+
+      // Other errors
       return res.status(401).json({
         success: false,
-        message: 'Not authorized to access this resource'
+        message: 'Not authorized to access this resource',
+        code: 'AUTH_ERROR'
       });
     }
   } catch (error) {
