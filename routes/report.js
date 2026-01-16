@@ -19,5 +19,8 @@ router.get('/trucks/:truckId', reportController.getTruckReport);
 router.get('/routes', reportController.getAllRoutesReport);
 router.get('/routes/:routeId', reportController.getRouteReport);
 
+// Overall summary
+router.get('/summary', reportController.getOverallSummary);
+
 module.exports = router;
 

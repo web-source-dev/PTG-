@@ -139,6 +139,30 @@ const transportJobSchema = new mongoose.Schema({
     type: Number
   },
 
+  // Profit Calculation Fields
+  pricePerGallon: {
+    type: Number,
+    default: 3.5
+  },
+  estimatedTolls: {
+    type: Number,
+    default: 0
+  },
+  estimatedMaintenance: {
+    type: Number,
+    default: 0
+  },
+  milesToLocation: {
+    type: Number // Distance from start/current location to pickup
+  },
+  totalMiles: {
+    type: Number // Distance from pickup to drop
+  },
+  mpg: {
+    type: Number,
+    default: 8 // Default MPG for trucks
+  },
+
   // Audit Trail
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

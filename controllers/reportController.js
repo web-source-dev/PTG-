@@ -794,3 +794,105 @@ exports.getAllRoutesReport = async (req, res) => {
   }
 };
 
+/**
+ * Get overall summary report - aggregated data across all routes, expenses, and transport jobs
+ */
+exports.getOverallSummary = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    // Build date filter for routes
+    const routeDateFilter = {};
+    if (startDate || endDate) {
+      routeDateFilter.plannedStartDate = {};
+      if (startDate) routeDateFilter.plannedStartDate.$gte = new Date(startDate);
+      if (endDate) routeDateFilter.plannedStartDate.$lte = new Date(endDate);
+    }
+
+    // Build date filter for expenses
+    const expenseDateFilter = {};
+    if (startDate || endDate) {
+      expenseDateFilter.createdAt = {};
+      if (startDate) expenseDateFilter.createdAt.$gte = new Date(startDate);
+      if (endDate) expenseDateFilter.createdAt.$lte = new Date(endDate);
+    }
+
+    // Get all routes in the date range
+    const routes = await Route.find(routeDateFilter)
+      .populate({
+        path: 'selectedTransportJobs',
+        select: 'carrierPayment'
+      })
+      .populate({
+        path: 'stops.transportJobId',
+        select: 'carrierPayment'
+      });
+
+    // Get all unique transport job IDs (loads completed)
+    const transportJobIds = new Set();
+    routes.forEach(route => {
+      if (route.selectedTransportJobs && Array.isArray(route.selectedTransportJobs)) {
+        route.selectedTransportJobs.forEach(jobId => {
+          const id = extractId(jobId);
+          if (id) transportJobIds.add(id);
+        });
+      }
+      if (route.stops && Array.isArray(route.stops)) {
+        route.stops.forEach(stop => {
+          if (stop.transportJobId) {
+            const id = extractId(stop.transportJobId);
+            if (id) transportJobIds.add(id);
+          }
+        });
+      }
+    });
+
+    // Get all transport jobs to calculate total carrier payment
+    const transportJobs = await TransportJob.find({
+      _id: { $in: Array.from(transportJobIds) }
+    }).select('carrierPayment');
+
+    // Get all expenses in the date range
+    const expenses = await Expense.find(expenseDateFilter);
+
+    // Calculate totals
+    const totalCarrierPayment = transportJobs.reduce((sum, tj) => sum + (tj.carrierPayment || 0), 0);
+    const totalExpenses = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
+    const netAmount = totalCarrierPayment - totalExpenses;
+
+    // Calculate total miles driven (from routes - convert meters to miles)
+    const totalMiles = routes.reduce((sum, route) => {
+      const distanceMeters = route.totalDistance?.value || 0;
+      const distanceMiles = distanceMeters / 1609.34; // Convert meters to miles
+      return sum + distanceMiles;
+    }, 0);
+
+    // Total loads completed (unique transport jobs)
+    const loadsCompleted = transportJobIds.size;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          netAmount,
+          totalMiles: Math.round(totalMiles * 100) / 100, // Round to 2 decimal places
+          totalExpenses,
+          loadsCompleted,
+          totalCarrierPayment
+        },
+        period: {
+          startDate: startDate || null,
+          endDate: endDate || null
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error generating overall summary:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to generate overall summary',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
