@@ -30,6 +30,13 @@ const truckSchema = new mongoose.Schema({
     required: true
   },
 
+  // Maintenance Rate (cost per mile or per unit)
+  maintenanceRate: {
+    type: Number,
+    min: 0,
+    default: 0
+  },
+
   // Status
   status: {
     type: String,

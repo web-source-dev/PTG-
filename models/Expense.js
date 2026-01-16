@@ -38,7 +38,12 @@ const expenseSchema = new mongoose.Schema({
   },
 
   // Odometer reading for fuel expenses and maintenance expenses to track mileage
+  // Optional - not required for automatic maintenance expenses based on route distance
   odometerReading: Number,
+
+  // Maintenance rate tracking (for automatic maintenance expenses based on truck maintenance rate)
+  maintenanceRate: Number, // The maintenance rate per mile that was used to calculate this expense
+  miles: Number, // The number of miles for which this maintenance expense was calculated
 
   // Location data when the expense was created it auto sets from the background location for verify manual location
   backgroundLocation: {

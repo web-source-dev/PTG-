@@ -10,6 +10,7 @@ const TransportJob = require('../models/TransportJob');
 const Route = require('../models/Route');
 const Truck = require('../models/Truck');
 const User = require('../models/User');
+const Expense = require('../models/Expense');
 const {
   VEHICLE_STATUS,
   TRANSPORT_JOB_STATUS,
@@ -17,6 +18,88 @@ const {
   TRUCK_STATUS,
   ROUTE_STOP_STATUS
 } = require('../constants/status');
+
+/**
+ * Helper function to create automatic maintenance expense for a completed route
+ * This is called when a route is completed to create an expense based on truck maintenance rate
+ */
+const createMaintenanceExpenseForRoute = async (routeId) => {
+  try {
+    // Get the route with populated truck and driver
+    const route = await Route.findById(routeId)
+      .populate('truckId')
+      .populate('driverId');
+
+    if (!route || !route.truckId || !route.driverId) {
+      return; // Can't create expense without route, truck, or driver
+    }
+
+    // Get fresh truck data to ensure we have the latest maintenanceRate
+    const truck = await Truck.findById(route.truckId._id || route.truckId);
+    
+    if (!truck || !truck.maintenanceRate || truck.maintenanceRate <= 0) {
+      return; // No maintenance rate set, skip expense creation
+    }
+
+    // Calculate miles from actualDistanceTraveled (in miles) or from totalDistance (in meters)
+    let miles = 0;
+    if (route.actualDistanceTraveled && route.actualDistanceTraveled > 0) {
+      miles = route.actualDistanceTraveled;
+    } else if (route.totalDistance && route.totalDistance.value) {
+      // Convert meters to miles
+      miles = route.totalDistance.value / 1609.34;
+    }
+
+    // Only create expense if we have valid miles
+    if (miles <= 0) {
+      return; // No distance traveled, skip expense creation
+    }
+
+    const maintenanceCost = truck.maintenanceRate * miles;
+    
+    // Get driver ID
+    const driverId = typeof route.driverId === 'object' 
+      ? (route.driverId._id || route.driverId.id) 
+      : route.driverId;
+    
+    // Get truck ID
+    const truckId = typeof route.truckId === 'object' 
+      ? (route.truckId._id || route.truckId.id) 
+      : route.truckId;
+
+    // Check if expense already exists for this route (to avoid duplicates)
+    const existingExpense = await Expense.findOne({
+      routeId: route._id,
+      type: 'maintenance',
+      maintenanceRate: truck.maintenanceRate,
+      miles: miles
+    });
+
+    if (existingExpense) {
+      console.log(`Maintenance expense already exists for route ${route.routeNumber || routeId}`);
+      return; // Expense already created, skip
+    }
+
+    // Create maintenance expense
+    const maintenanceExpense = await Expense.create({
+      type: 'maintenance',
+      category: 'service',
+      description: `Automatic maintenance expense for route ${route.routeNumber || routeId} - ${miles.toFixed(2)} miles at $${truck.maintenanceRate.toFixed(2)}/mile`,
+      totalCost: maintenanceCost,
+      maintenanceRate: truck.maintenanceRate, // Store the rate used at the time
+      miles: miles, // Store the miles used for calculation
+      routeId: route._id,
+      driverId: driverId,
+      truckId: truckId,
+      createdBy: driverId
+    });
+
+    console.log(`Created automatic maintenance expense for route ${route.routeNumber || routeId}: $${maintenanceCost.toFixed(2)} (${miles.toFixed(2)} miles × $${truck.maintenanceRate.toFixed(2)}/mile)`);
+  } catch (error) {
+    console.error('Error creating automatic maintenance expense for route:', error);
+    throw error;
+  }
+};
 
 /**
  * Update vehicle status when vehicle is created/submitted
@@ -370,6 +453,15 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
             });
           }
         }
+
+        // Create automatic maintenance expense when all stops are completed
+        // This ensures expense is created even if updateAllRelatedEntities is not called
+        try {
+          await createMaintenanceExpenseForRoute(routeId);
+        } catch (expenseError) {
+          console.error('Failed to create maintenance expense when all stops completed:', expenseError);
+          // Don't fail the stop update if expense creation fails
+        }
       }
     }
   } catch (error) {
@@ -517,6 +609,14 @@ const updateAllRelatedEntities = async (routeId) => {
         status: TRUCK_STATUS.AVAILABLE
       });
       console.log(`Updated truck ${route.truckId.truckNumber} to Available`);
+    }
+
+    // Create automatic maintenance expense based on truck maintenance rate
+    try {
+      await createMaintenanceExpenseForRoute(routeId);
+    } catch (expenseError) {
+      console.error('Error creating automatic maintenance expense:', expenseError);
+      // Don't fail the route completion if expense creation fails
     }
 
     console.log(`Successfully updated all related entities for route ${route.routeNumber}`);
