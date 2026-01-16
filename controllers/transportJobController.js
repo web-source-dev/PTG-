@@ -2,6 +2,9 @@ const TransportJob = require('../models/TransportJob');
 const Vehicle = require('../models/Vehicle');
 const AuditLog = require('../models/AuditLog');
 const { updateStatusOnTransportJobCreate } = require('../utils/statusManager');
+const centralDispatchListingsService = require('../utils/centralDispatchListingsService');
+const { formatVehicleToCentralDispatchListing } = require('../utils/centralDispatchFormatter');
+const { getConfig } = require('../config/centralDispatch');
 
 /**
  * Create a new transport job
@@ -14,6 +17,66 @@ exports.createTransportJob = async (req, res) => {
     if (req.user) {
       jobData.createdBy = req.user._id;
       jobData.lastUpdatedBy = req.user._id;
+    }
+
+    // If carrier is Central Dispatch, create listing first
+    let centralDispatchListingId = null;
+    if (jobData.carrier === 'Central Dispatch' && jobData.vehicleId) {
+      try {
+        // Fetch vehicle data
+        const vehicle = await Vehicle.findById(jobData.vehicleId);
+        if (!vehicle) {
+          return res.status(404).json({
+            success: false,
+            message: 'Vehicle not found'
+          });
+        }
+
+        // Get marketplace ID from config
+        const config = getConfig();
+        
+        // Format vehicle data for Central Dispatch
+        const listingData = formatVehicleToCentralDispatchListing(
+          vehicle,
+          null, // Transport job not created yet
+          {
+            carrierAmount: jobData.carrierPayment || jobData.centralDispatchAmount,
+            notes: jobData.centralDispatchNotes || jobData.notes,
+            marketplaceId: config.marketplaceId
+          }
+        );
+        
+        // Validate marketplace ID is provided
+        if (!config.marketplaceId) {
+          throw new Error('CENTRAL_DISPATCH_MARKETPLACE_ID is not configured. Please set it in environment variables.');
+        }
+
+        // Create listing in Central Dispatch
+        const listingResponse = await centralDispatchListingsService.createListing(listingData);
+        
+        // Extract listing ID from response
+        if (listingResponse.id) {
+          centralDispatchListingId = listingResponse.id.toString();
+        } else if (listingResponse.listingId) {
+          centralDispatchListingId = listingResponse.listingId.toString();
+        } else if (listingResponse.data && listingResponse.data.id) {
+          centralDispatchListingId = listingResponse.data.id.toString();
+        }
+
+        // Update job data with Central Dispatch information
+        if (centralDispatchListingId) {
+          jobData.centralDispatchLoadId = centralDispatchListingId;
+          jobData.centralDispatchPosted = true;
+          jobData.centralDispatchPostedAt = new Date();
+          jobData.centralDispatchAmount = jobData.carrierPayment || jobData.centralDispatchAmount;
+          jobData.centralDispatchNotes = jobData.centralDispatchNotes || jobData.notes;
+        }
+      } catch (cdError) {
+        console.error('Error creating Central Dispatch listing:', cdError);
+        // Continue with transport job creation even if CD listing fails
+        // But log the error
+        jobData.centralDispatchNotes = `Failed to create Central Dispatch listing: ${cdError.message}`;
+      }
     }
 
     // Create transport job
@@ -30,9 +93,10 @@ exports.createTransportJob = async (req, res) => {
         jobNumber: transportJob.jobNumber,
         vehicleId: jobData.vehicleId,
         carrier: jobData.carrier,
-        status: transportJob.status
+        status: transportJob.status,
+        centralDispatchLoadId: centralDispatchListingId
       },
-      notes: `Created transport job ${transportJob.jobNumber}`
+      notes: `Created transport job ${transportJob.jobNumber}${centralDispatchListingId ? ` with Central Dispatch listing ${centralDispatchListingId}` : ''}`
     });
 
     // If vehicleId is provided, update vehicle with transport job reference
@@ -51,7 +115,7 @@ exports.createTransportJob = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Transport job created successfully',
+      message: 'Transport job created successfully' + (centralDispatchListingId ? ' and posted to Central Dispatch' : ''),
       data: {
         transportJob: updatedTransportJob
       }
@@ -226,6 +290,57 @@ exports.updateTransportJob = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to update transport job',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Get Central Dispatch listing for a transport job
+ */
+exports.getCentralDispatchListing = async (req, res) => {
+  try {
+    const transportJob = await TransportJob.findById(req.params.id)
+      .populate('vehicleId');
+
+    if (!transportJob) {
+      return res.status(404).json({
+        success: false,
+        message: 'Transport job not found'
+      });
+    }
+
+    if (transportJob.carrier !== 'Central Dispatch') {
+      return res.status(400).json({
+        success: false,
+        message: 'This transport job is not a Central Dispatch job'
+      });
+    }
+
+    if (!transportJob.centralDispatchLoadId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Central Dispatch listing ID not found for this transport job'
+      });
+    }
+
+    // Fetch listing from Central Dispatch
+    const listing = await centralDispatchListingsService.getListing(transportJob.centralDispatchLoadId);
+    const { formatCentralDispatchListingToSystem } = require('../utils/centralDispatchFormatter');
+    const formattedListing = formatCentralDispatchListingToSystem(listing);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        listing: formattedListing,
+        rawListing: listing
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching Central Dispatch listing:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch Central Dispatch listing',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

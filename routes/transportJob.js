@@ -20,6 +20,9 @@ router.get('/:id', transportJobController.getTransportJobById);
 // PUT /api/transport-jobs/:id - Update transport job
 router.put('/:id', authorizeRoles('ptgAdmin', 'ptgDispatcher'), transportJobController.updateTransportJob);
 
+// GET /api/transport-jobs/:id/central-dispatch - Get Central Dispatch listing for a transport job
+router.get('/:id/central-dispatch', authorizeRoles('ptgAdmin', 'ptgDispatcher'), transportJobController.getCentralDispatchListing);
+
 // DELETE /api/transport-jobs/:id - Delete transport job
 router.delete('/:id', authorizeRoles('ptgAdmin'), transportJobController.deleteTransportJob);
 

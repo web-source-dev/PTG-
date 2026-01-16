@@ -3,6 +3,7 @@ const Vehicle = require('../models/Vehicle');
 const TransportJob = require('../models/TransportJob');
 const AuditLog = require('../models/AuditLog');
 const { updateVehicleOnCreate } = require('../utils/statusManager');
+const { calculateVehicleDistance, calculateVehiclesDistances } = require('../utils/vehicleDistanceService');
 
 /**
  * Create a new vehicle
@@ -98,9 +99,12 @@ exports.getAllVehicles = async (req, res) => {
 
     const total = await Vehicle.countDocuments(query);
 
+    // Calculate distances for all vehicles (in parallel, but with error handling)
+    const vehiclesWithDistance = await calculateVehiclesDistances(vehicles);
+
     res.status(200).json({
       success: true,
-      data: vehicles,
+      data: vehiclesWithDistance,
       pagination: {
         page: parseInt(page),
         pages: Math.ceil(total / parseInt(limit)),
@@ -158,10 +162,26 @@ exports.getVehicleById = async (req, res) => {
       }
     }
 
+    // Calculate distance between pickup and drop locations
+    let distanceInfo = null;
+    try {
+      distanceInfo = await calculateVehicleDistance(vehicle);
+    } catch (error) {
+      console.error('Error calculating distance for vehicle:', error);
+      // Continue without distance info
+    }
+
+    // Convert vehicle to plain object and add distance info
+    const vehicleObj = vehicle.toObject ? vehicle.toObject() : vehicle;
+    vehicleObj.distanceInfo = distanceInfo ? {
+      distance: distanceInfo.distance,
+      duration: distanceInfo.duration
+    } : null;
+
     res.status(200).json({
       success: true,
       data: {
-        vehicle,
+        vehicle: vehicleObj,
         transportJobData
       }
     });
