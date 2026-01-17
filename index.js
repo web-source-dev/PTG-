@@ -51,6 +51,7 @@ app.use('/api/expenses', require('./routes/expense'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/calendar', require('./routes/calendar'));
 app.use('/api/reports', require('./routes/report'));
+app.use('/api/vehicle-profit-calculations', require('./routes/vehicleProfitCalculation'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

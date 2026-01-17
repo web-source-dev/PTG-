@@ -195,18 +195,18 @@ const updateStatusOnStopsSetup = async (routeId, stops = null) => {
 
     // Update transport jobs status to "Dispatched" and vehicles to "Ready for Transport"
     for (const jobId of transportJobIds) {
-      await TransportJob.findByIdAndUpdate(jobId, {
-        status: TRANSPORT_JOB_STATUS.DISPATCHED
-      });
-
-      // Get transport job to find vehicle
-      const job = await TransportJob.findById(jobId).populate('vehicleId');
-      if (job && job.vehicleId) {
-        await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-          status: VEHICLE_STATUS.READY_FOR_TRANSPORT
+        await TransportJob.findByIdAndUpdate(jobId, {
+          status: TRANSPORT_JOB_STATUS.DISPATCHED
         });
+
+        // Get transport job to find vehicle
+        const job = await TransportJob.findById(jobId).populate('vehicleId');
+        if (job && job.vehicleId) {
+          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
+            status: VEHICLE_STATUS.READY_FOR_TRANSPORT
+          });
+        }
       }
-    }
 
     // Ensure route status is "Planned"
     if (route.status !== ROUTE_STATUS.PLANNED) {
@@ -258,7 +258,7 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
       // Route started - update route to "In Progress", truck to "In Use"
       // DO NOT update transport jobs or vehicles here - they remain "Dispatched" and "Ready for Transport"
       // Transport jobs and vehicles are updated when pickup stops are completed
-      
+
       // Update truck status to "In Use"
       if (route.truckId) {
         await Truck.findByIdAndUpdate(route.truckId._id || route.truckId, {

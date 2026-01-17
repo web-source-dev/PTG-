@@ -17,6 +17,8 @@ const auditLogSchema = new mongoose.Schema({
       'create_transport_job', 'update_transport_job', 'delete_transport_job',
       // Vehicle actions
       'create_vehicle', 'update_vehicle', 'delete_vehicle',
+      // Vehicle Profit Calculation actions
+      'create_vehicle_profit_calculation', 'update_vehicle_profit_calculation', 'delete_vehicle_profit_calculation',
       // Calendar actions
       'create_calendar_event', 'update_calendar_event', 'delete_calendar_event',
       // User management actions
@@ -30,7 +32,7 @@ const auditLogSchema = new mongoose.Schema({
 
   entityType: {
     type: String,
-    enum: ['route', 'transportJob', 'vehicle', 'truck', 'expense', 'user', 'file', 'location', 'calendarEvent']
+    enum: ['route', 'transportJob', 'vehicle', 'truck', 'expense', 'user', 'file', 'location', 'calendarEvent', 'vehicleProfitCalculation']
   },
 
   entityId: {
