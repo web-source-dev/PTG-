@@ -41,13 +41,13 @@ const createMaintenanceExpenseForRoute = async (routeId) => {
       return; // No maintenance rate set, skip expense creation
     }
 
-    // Calculate miles from actualDistanceTraveled (in miles) or from totalDistance (in meters)
+    // Calculate miles from actualDistanceTraveled (in miles) or from totalDistance (now also in miles)
     let miles = 0;
     if (route.actualDistanceTraveled && route.actualDistanceTraveled > 0) {
       miles = route.actualDistanceTraveled;
     } else if (route.totalDistance && route.totalDistance.value) {
-      // Convert meters to miles
-      miles = route.totalDistance.value / 1609.34;
+      // totalDistance.value is now stored in miles
+      miles = route.totalDistance.value;
     }
 
     // Only create expense if we have valid miles
@@ -119,15 +119,27 @@ const updateVehicleOnCreate = async (vehicleId) => {
  */
 const updateStatusOnTransportJobCreate = async (transportJobId, vehicleId) => {
   try {
-    // Update transport job status to "Needs Dispatch"
+    // Get the transport job to check if it's posted to Central Dispatch
+    const transportJob = await TransportJob.findById(transportJobId);
+    
+    // Determine status based on whether it's posted to Central Dispatch
+    const jobStatus = transportJob?.centralDispatchPosted 
+      ? TRANSPORT_JOB_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
+      : TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
+    
+    const vehicleStatus = transportJob?.centralDispatchPosted
+      ? VEHICLE_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
+      : VEHICLE_STATUS.READY_FOR_TRANSPORT;
+
+    // Update transport job status
     await TransportJob.findByIdAndUpdate(transportJobId, {
-      status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH
+      status: jobStatus
     });
 
-    // Update vehicle status to "Ready for Transport"
+    // Update vehicle status
     if (vehicleId) {
       await Vehicle.findByIdAndUpdate(vehicleId, {
-        status: VEHICLE_STATUS.READY_FOR_TRANSPORT
+        status: vehicleStatus
       });
     }
   } catch (error) {
@@ -307,14 +319,25 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
     } else if (newStatus === ROUTE_STATUS.CANCELLED) {
       // Route cancelled - revert transport jobs and vehicles
       for (const jobId of transportJobIds) {
+        // Get transport job to check if it's posted to Central Dispatch
+        const job = await TransportJob.findById(jobId).populate('vehicleId');
+        
+        // Determine status based on whether it's posted to Central Dispatch
+        const jobStatus = job?.centralDispatchPosted
+          ? TRANSPORT_JOB_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
+          : TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
+        
+        const vehicleStatus = job?.centralDispatchPosted
+          ? VEHICLE_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
+          : VEHICLE_STATUS.READY_FOR_TRANSPORT;
+
         await TransportJob.findByIdAndUpdate(jobId, {
-          status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH
+          status: jobStatus
         });
 
-        const job = await TransportJob.findById(jobId).populate('vehicleId');
         if (job && job.vehicleId) {
           await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: VEHICLE_STATUS.READY_FOR_TRANSPORT
+            status: vehicleStatus
           });
         }
       }
@@ -474,17 +497,28 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
  */
 const updateStatusOnTransportJobRemoved = async (transportJobId) => {
   try {
-    // Update transport job status back to "Needs Dispatch"
+    // Get transport job to check if it's posted to Central Dispatch
+    const job = await TransportJob.findById(transportJobId).populate('vehicleId');
+    
+    // Determine status based on whether it's posted to Central Dispatch
+    const jobStatus = job?.centralDispatchPosted
+      ? TRANSPORT_JOB_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
+      : TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
+    
+    const vehicleStatus = job?.centralDispatchPosted
+      ? VEHICLE_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
+      : VEHICLE_STATUS.READY_FOR_TRANSPORT;
+
+    // Update transport job status
     await TransportJob.findByIdAndUpdate(transportJobId, {
-      status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH,
+      status: jobStatus,
       $unset: { routeId: 1 }
     });
 
-    // Update vehicle status back to "Ready for Transport"
-    const job = await TransportJob.findById(transportJobId).populate('vehicleId');
+    // Update vehicle status
     if (job && job.vehicleId) {
       await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-        status: VEHICLE_STATUS.READY_FOR_TRANSPORT
+        status: vehicleStatus
       });
     }
   } catch (error) {

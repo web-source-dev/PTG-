@@ -29,7 +29,7 @@ const getRouteActionFromStatus = (newStatus, oldStatus) => {
  */
 exports.getMyRoutes = async (req, res) => {
   try {
-    const { page = 1, limit = 50, status } = req.query;
+    const { page = 1, limit = 50, status, startDate, endDate } = req.query;
     const driverId = req.user._id;
 
     // Build query - only routes assigned to this driver
@@ -42,6 +42,21 @@ exports.getMyRoutes = async (req, res) => {
         query.status = { $in: statusArray };
       } else {
         query.status = status;
+      }
+    }
+
+    // Date range filtering - filter by plannedStartDate
+    if (startDate || endDate) {
+      query.plannedStartDate = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        query.plannedStartDate.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.plannedStartDate.$lte = end;
       }
     }
 

@@ -251,7 +251,7 @@ const routeSchema = new mongoose.Schema({
     // Distance and duration from previous stop
     distanceFromPrevious: {
       text: String,
-      value: Number // meters
+      value: Number // miles
     },
     durationFromPrevious: {
       text: String,
@@ -269,7 +269,7 @@ const routeSchema = new mongoose.Schema({
   // Total route distance and duration
   totalDistance: {
     text: String,
-    value: Number // meters
+    value: Number // miles
   },
   totalDuration: {
     text: String,

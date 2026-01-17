@@ -71,6 +71,7 @@ class LocationService {
           origin: `${origin.latitude},${origin.longitude}`,
           destination: `${destination.latitude},${destination.longitude}`,
           mode: mode,
+          units: 'imperial', // Use imperial units (miles) instead of metric (kilometers)
           key: this.apiKey
         }
       });
@@ -85,7 +86,7 @@ class LocationService {
       return {
         distance: {
           text: leg.distance.text,
-          value: leg.distance.value // meters
+          value: leg.distance.value / 1609.34 // Convert meters to miles
         },
         duration: {
           text: leg.duration.text,
@@ -179,7 +180,7 @@ class LocationService {
         if (i === 0) {
           // First stop: no previous location, so distance is 0
           distanceFromPrevious = {
-            text: '0 km',
+            text: '0 mi',
             value: 0
           };
           durationFromPrevious = {
@@ -317,9 +318,9 @@ class LocationService {
 
         const updatedStop = updatedStopData;
 
-        // Add to totals
+        // Add to totals (distance is already in miles from calculateDistance)
         if (distanceFromPrevious) {
-          totalDistance += distanceFromPrevious.value;
+          totalDistance += distanceFromPrevious.value; // Already in miles
           totalDuration += durationFromPrevious.value;
         }
 
@@ -330,8 +331,8 @@ class LocationService {
         ...route.toObject(),
         stops: updatedStops,
         totalDistance: {
-          text: this.formatDistance(totalDistance),
-          value: totalDistance
+          text: this.formatDistance(totalDistance), // totalDistance is already in miles
+          value: totalDistance // Store in miles
         },
         totalDuration: {
           text: this.formatDuration(totalDuration),
@@ -439,11 +440,18 @@ class LocationService {
    * @param {number} meters - Distance in meters
    * @returns {string} Formatted distance
    */
-  formatDistance(meters) {
-    if (meters < 1000) {
-      return `${Math.round(meters)} m`;
+  formatDistance(miles) {
+    // Input is now in miles (not meters)
+    if (miles < 0.1) {
+      // For very short distances, show in feet
+      const feet = miles * 5280;
+      return `${Math.round(feet)} ft`;
+    } else if (miles < 1) {
+      // For distances less than a mile, show in decimal miles
+      return `${miles.toFixed(2)} mi`;
     } else {
-      return `${(meters / 1000).toFixed(1)} km`;
+      // For distances 1 mile or more, show with 1 decimal place
+      return `${miles.toFixed(1)} mi`;
     }
   }
 

@@ -173,7 +173,7 @@ exports.getDriverReport = async (req, res) => {
       totalFuelCost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0),
       totalMaintenanceCost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0),
       totalCost,
-      totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0),
+      totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0), // Already in miles
       totalCarrierPayment,
       netAmount: totalCarrierPayment - totalCost,
       totalGallons
@@ -315,7 +315,7 @@ exports.getTruckReport = async (req, res) => {
       totalFuelCost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0),
       totalMaintenanceCost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0),
       totalCost,
-      totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0),
+      totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0), // Already in miles
       totalGallons,
       totalCarrierPayment,
       netAmount: totalCarrierPayment - totalCost
@@ -860,11 +860,9 @@ exports.getOverallSummary = async (req, res) => {
     const totalExpenses = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
     const netAmount = totalCarrierPayment - totalExpenses;
 
-    // Calculate total miles driven (from routes - convert meters to miles)
+    // Calculate total miles driven (from routes - already in miles)
     const totalMiles = routes.reduce((sum, route) => {
-      const distanceMeters = route.totalDistance?.value || 0;
-      const distanceMiles = distanceMeters / 1609.34; // Convert meters to miles
-      return sum + distanceMiles;
+      return sum + (route.totalDistance?.value || 0); // Already in miles
     }, 0);
 
     // Total loads completed (unique transport jobs)

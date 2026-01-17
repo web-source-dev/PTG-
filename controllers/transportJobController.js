@@ -135,7 +135,7 @@ exports.createTransportJob = async (req, res) => {
  */
 exports.getAllTransportJobs = async (req, res) => {
   try {
-    const { page = 1, limit = 50, status, carrier, search } = req.query;
+    const { page = 1, limit = 50, status, carrier, search, startDate, endDate } = req.query;
 
     // Build query
     let query = {};
@@ -153,6 +153,21 @@ exports.getAllTransportJobs = async (req, res) => {
         { jobNumber: { $regex: search, $options: 'i' } },
         { centralDispatchLoadId: { $regex: search, $options: 'i' } }
       ];
+    }
+
+    // Date range filtering - filter by createdAt
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        query.createdAt.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = end;
+      }
     }
 
     const transportJobs = await TransportJob.find(query)

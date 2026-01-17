@@ -300,7 +300,7 @@ exports.createRoute = async (req, res) => {
  */
 exports.getAllRoutes = async (req, res) => {
   try {
-    const { page = 1, limit = 50, status, driverId, truckId, search } = req.query;
+    const { page = 1, limit = 50, status, driverId, truckId, search, startDate, endDate } = req.query;
 
     // Build query
     let query = {};
@@ -327,6 +327,21 @@ exports.getAllRoutes = async (req, res) => {
       query.$or = [
         { routeNumber: { $regex: search, $options: 'i' } }
       ];
+    }
+
+    // Date range filtering - filter by plannedStartDate
+    if (startDate || endDate) {
+      query.plannedStartDate = {};
+      if (startDate) {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        query.plannedStartDate.$gte = start;
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        query.plannedStartDate.$lte = end;
+      }
     }
 
     const routes = await Route.find(query)
