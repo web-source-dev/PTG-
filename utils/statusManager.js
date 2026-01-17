@@ -293,7 +293,8 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
           const job = await TransportJob.findById(jobId).populate('vehicleId');
           if (job && job.vehicleId) {
             await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-              status: VEHICLE_STATUS.DELIVERED
+              status: VEHICLE_STATUS.DELIVERED,
+              deliveredAt: new Date()
             });
           }
         }
@@ -388,7 +389,8 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
         const job = await TransportJob.findById(jobId).populate('vehicleId');
         if (job && job.vehicleId) {
           await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: VEHICLE_STATUS.DELIVERED
+            status: VEHICLE_STATUS.DELIVERED,
+            deliveredAt: new Date()
           });
         }
       }
@@ -472,7 +474,8 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
           const job = await TransportJob.findById(jobId).populate('vehicleId');
           if (job && job.vehicleId) {
             await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-              status: VEHICLE_STATUS.DELIVERED
+              status: VEHICLE_STATUS.DELIVERED,
+              deliveredAt: new Date()
             });
           }
         }
@@ -630,6 +633,7 @@ const updateAllRelatedEntities = async (routeId) => {
         if (job.vehicleId && job.vehicleId.status !== 'Delivered') {
           await Vehicle.findByIdAndUpdate(job.vehicleId._id, {
             status: VEHICLE_STATUS.DELIVERED,
+            deliveredAt: new Date(),
             lastUpdatedBy: route.driverId
           });
           console.log(`Updated vehicle ${job.vehicleId.vin} to Delivered`);

@@ -173,6 +173,11 @@ const vehicleSchema = new mongoose.Schema({
     default: VEHICLE_STATUS.PURCHASED_INTAKE_NEEDED
   },
 
+  // Delivery tracking
+  deliveredAt: {
+    type: Date
+  },
+
   // Transport Job Reference
   transportJobId: {
     type: mongoose.Schema.Types.ObjectId,

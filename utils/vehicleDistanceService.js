@@ -41,13 +41,11 @@ async function calculateVehicleDistance(vehicle) {
       'driving'
     );
 
-    // Convert distance from meters to miles before storing
-    const distanceInMiles = distanceInfo.distance.value / 1609.34;
-    
+    // distanceInfo.distance.value is already in miles from calculateDistance()
     return {
       distance: {
         text: distanceInfo.distance.text, // Keep text as-is (already formatted by Google Maps)
-        value: distanceInMiles // Store in miles
+        value: distanceInfo.distance.value // Already in miles from calculateDistance()
       },
       duration: distanceInfo.duration,
       pickupCoordinates: pickupCoords,
