@@ -464,10 +464,10 @@ exports.updateRoute = async (req, res) => {
     // Handle selectedTransportJobs updates
     if (updateData.selectedTransportJobs !== undefined) {
       // Remove route reference from old transport jobs
-      const oldJobIds = route.selectedTransportJobs 
+      const oldJobIds = route.selectedTransportJobs
         ? route.selectedTransportJobs.map(id => id.toString())
         : [];
-      
+
       // Also get job IDs from old stops
       if (route.stops && Array.isArray(route.stops)) {
         route.stops.forEach(stop => {
@@ -478,6 +478,26 @@ exports.updateRoute = async (req, res) => {
       }
 
       const uniqueOldJobIds = [...new Set(oldJobIds)];
+
+      // Get new transport job IDs
+      const newJobIds = Array.isArray(updateData.selectedTransportJobs)
+        ? updateData.selectedTransportJobs.map(id => id.toString())
+        : [];
+
+      // Find transport jobs that are being removed
+      const removedJobIds = uniqueOldJobIds.filter(jobId => !newJobIds.includes(jobId));
+
+      // Update status for removed transport jobs
+      for (const removedJobId of removedJobIds) {
+        try {
+          await updateStatusOnTransportJobRemoved(removedJobId);
+        } catch (removalError) {
+          console.error('Failed to update status for removed transport job:', removedJobId, removalError);
+          // Don't fail the route update if transport job status update fails
+        }
+      }
+
+      // Remove route reference from old transport jobs
       for (const jobId of uniqueOldJobIds) {
         await TransportJob.findByIdAndUpdate(jobId, {
           $unset: { routeId: 1 }
@@ -496,6 +516,21 @@ exports.updateRoute = async (req, res) => {
 
     // Handle stops updates - ensure sequence is set and update transport job references
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
+      // Get original transport jobs from the route before any updates
+      const originalJobIds = new Set();
+      if (route.selectedTransportJobs && Array.isArray(route.selectedTransportJobs)) {
+        route.selectedTransportJobs.forEach(jobId => {
+          originalJobIds.add(jobId.toString());
+        });
+      }
+      if (route.stops && Array.isArray(route.stops)) {
+        route.stops.forEach(stop => {
+          if (stop.transportJobId) {
+            originalJobIds.add(stop.transportJobId.toString());
+          }
+        });
+      }
+
       // Ensure sequence is set for all stops and initialize checklists
       const { getDefaultChecklist } = require('../utils/checklistDefaults');
       updateData.stops.forEach((stop, index) => {
@@ -516,7 +551,7 @@ exports.updateRoute = async (req, res) => {
           jobIds.add(stop.transportJobId.toString());
         }
       });
-      
+
       // Sync selectedTransportJobs with transport jobs from stops
       if (jobIds.size > 0) {
         updateData.selectedTransportJobs = Array.from(jobIds).map(id => new mongoose.Types.ObjectId(id));
@@ -524,11 +559,30 @@ exports.updateRoute = async (req, res) => {
         // If no transport jobs in stops, clear selectedTransportJobs
         updateData.selectedTransportJobs = [];
       }
-      
+
       for (const jobId of jobIds) {
         await TransportJob.findByIdAndUpdate(jobId, {
           routeId: route._id
         });
+      }
+
+      // Check for transport jobs that were removed from the route
+      // These jobs should have their status reverted
+      const removedJobIds = [];
+      for (const originalJobId of originalJobIds) {
+        if (!jobIds.has(originalJobId)) {
+          removedJobIds.push(originalJobId);
+        }
+      }
+
+      // Update status for removed transport jobs
+      for (const removedJobId of removedJobIds) {
+        try {
+          await updateStatusOnTransportJobRemoved(removedJobId);
+        } catch (removalError) {
+          console.error('Failed to update status for removed transport job:', removedJobId, removalError);
+          // Don't fail the route update if transport job status update fails
+        }
       }
 
       // Note: Stops setup status update will be called AFTER route is saved
