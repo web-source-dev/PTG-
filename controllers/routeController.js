@@ -611,7 +611,8 @@ exports.updateRoute = async (req, res) => {
               index,
               updatedStop.status,
               stopType,
-              transportJobId
+              transportJobId,
+              updateData.stops // Pass the updated stops
             );
           } catch (stopStatusError) {
             console.error('Failed to update statuses on stop update:', stopStatusError);

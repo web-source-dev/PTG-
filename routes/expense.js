@@ -7,6 +7,7 @@ const { protect, authorizeRoles } = require('../middleware/auth');
 router.use(protect);
 
 // Routes for expenses
+router.post('/', expenseController.createExpense);
 router.post('/fuel', expenseController.createFuelExpense);
 router.post('/maintenance', expenseController.createMaintenanceExpense);
 router.get('/driver/:driverId', expenseController.getExpensesByDriver);

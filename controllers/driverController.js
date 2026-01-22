@@ -690,7 +690,8 @@ exports.updateMyRoute = async (req, res) => {
               index,
               updatedStop.status,
               stopType,
-              transportJobId
+              transportJobId,
+              route.stops // Pass the current route stops (they should already be updated)
             );
           } catch (stopStatusError) {
             console.error('Failed to update statuses on stop update:', stopStatusError);
@@ -794,12 +795,20 @@ exports.updateMyRouteStop = async (req, res) => {
       try {
         const stopType = originalStop.stopType;
         const transportJobId = originalStop.transportJobId;
+        // For this endpoint, we need to create updated stops with the new status
+        const updatedStops = route.stops.map((stop, idx) => {
+          if (idx === stopIndex) {
+            return { ...stop, status: newStopStatus };
+          }
+          return stop;
+        });
         await updateStatusOnStopUpdate(
           routeId,
           stopIndex,
           newStopStatus,
           stopType,
-          transportJobId
+          transportJobId,
+          updatedStops
         );
       } catch (stopStatusError) {
         console.error('Failed to update statuses on stop update:', stopStatusError);

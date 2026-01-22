@@ -12,7 +12,7 @@ const auditLogSchema = new mongoose.Schema({
       // Checklist and report actions
       'mark_stop_completed', 'complete_checklist_item', 'add_report',
       // Expense actions
-      'add_fuel_expense', 'add_maintenance_expense',
+      'add_fuel_expense', 'add_maintenance_expense', 'add_expense',
       // Transport job actions
       'create_transport_job', 'update_transport_job', 'delete_transport_job',
       // Vehicle actions

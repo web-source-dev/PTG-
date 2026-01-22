@@ -257,6 +257,99 @@ exports.getExpensesByRoute = async (req, res) => {
 };
 
 /**
+ * Create general expense (for routes)
+ */
+exports.createExpense = async (req, res) => {
+  try {
+    const { driverId, routeId, backgroundLocation, askedLocation, ...expenseData } = req.body;
+
+    // Validate required fields
+    if (!expenseData.type || !expenseData.totalCost || !driverId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: type, totalCost, driverId'
+      });
+    }
+
+    // Create expense
+    const expense = await Expense.create({
+      type: expenseData.type,
+      category: expenseData.category || 'other',
+      totalCost: parseFloat(expenseData.totalCost),
+      description: expenseData.description,
+      gallons: expenseData.gallons ? parseFloat(expenseData.gallons) : undefined,
+      pricePerGallon: expenseData.pricePerGallon ? parseFloat(expenseData.pricePerGallon) : undefined,
+      odometerReading: expenseData.odometerReading ? parseFloat(expenseData.odometerReading) : undefined,
+      backgroundLocation: backgroundLocation ? {
+        latitude: parseFloat(backgroundLocation.latitude),
+        longitude: parseFloat(backgroundLocation.longitude),
+        accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
+      } : undefined,
+      askedLocation: askedLocation ? {
+        latitude: parseFloat(askedLocation.latitude),
+        longitude: parseFloat(askedLocation.longitude),
+        accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
+        formattedAddress: askedLocation.formattedAddress || undefined,
+        name: askedLocation.name || undefined,
+        address: askedLocation.address || undefined,
+        city: askedLocation.city || undefined,
+        state: askedLocation.state || undefined,
+        zipCode: askedLocation.zipCode || undefined,
+        placeId: askedLocation.placeId || undefined
+      } : undefined,
+      routeId,
+      driverId,
+      truckId: expenseData.truckId,
+      vehicleId: expenseData.vehicleId,
+      createdBy: req.user._id
+    });
+
+    // Log the action
+    const auditLog = await AuditLog.create({
+      action: 'add_expense',
+      entityType: 'expense',
+      entityId: expense._id,
+      userId: req.user._id,
+      driverId: driverId,
+      location: askedLocation || backgroundLocation,
+      routeId,
+      details: {
+        type: expenseData.type,
+        totalCost: parseFloat(expenseData.totalCost),
+        description: expenseData.description,
+        truckId: expenseData.truckId,
+        backgroundLocation: backgroundLocation ? { latitude: backgroundLocation.latitude, longitude: backgroundLocation.longitude } : undefined,
+        askedLocation: askedLocation ? { latitude: askedLocation.latitude, longitude: askedLocation.longitude } : undefined
+      },
+      notes: `Added ${expenseData.type} expense: ${expenseData.description || ''} for $${expenseData.totalCost}`
+    });
+
+    // Add to route tracking if routeId provided
+    if (routeId) {
+      const locationForTracking = askedLocation || backgroundLocation;
+      await routeTracker.addActionEntry(routeId, 'add_expense', locationForTracking, auditLog._id, {
+        expenseId: expense._id,
+        type: expenseData.type,
+        totalCost: parseFloat(expenseData.totalCost),
+        description: expenseData.description
+      });
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Expense created successfully',
+      data: { expense }
+    });
+  } catch (error) {
+    console.error('Create expense error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to create expense'
+    });
+  }
+};
+
+/**
  * Get all expenses with pagination
  */
 exports.getAllExpenses = async (req, res) => {

@@ -360,11 +360,14 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
  * Update statuses when a stop is updated
  * Note: This should be called after the route has been saved with updated stops
  */
-const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopType, transportJobId) => {
+const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopType, transportJobId, updatedStops = null) => {
   try {
-    // Reload route to get latest stop statuses
+    // Reload route to get latest data, but use updatedStops if provided
     const route = await Route.findById(routeId);
     if (!route) return;
+
+    // Use updated stops if provided, otherwise use route.stops
+    const stopsToCheck = updatedStops || route.stops;
 
     // If stop is completed and it's a drop stop, update transport job and vehicle
     if (newStopStatus === ROUTE_STOP_STATUS.COMPLETED && stopType === 'drop' && transportJobId) {
@@ -373,7 +376,7 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
         : transportJobId;
 
       // Check if all drop stops for this transport job are completed
-      const allDropStopsCompleted = route.stops.filter(stop => {
+      const allDropStopsCompleted = stopsToCheck.filter(stop => {
         const stopJobId = typeof stop.transportJobId === 'object'
           ? (stop.transportJobId._id || stop.transportJobId.id)
           : stop.transportJobId;
@@ -420,8 +423,8 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
     }
 
     // Check if all stops are completed and update route status
-    if (route.stops && route.stops.length > 0) {
-      const allStopsCompleted = route.stops.every(stop => 
+    if (stopsToCheck && stopsToCheck.length > 0) {
+      const allStopsCompleted = stopsToCheck.every(stop =>
         stop.status === ROUTE_STOP_STATUS.COMPLETED
       );
 
@@ -456,8 +459,8 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
           });
         }
 
-        // Also get job IDs from stops
-        route.stops.forEach(stop => {
+        // Also get job IDs from stops (use updated stops)
+        stopsToCheck.forEach(stop => {
           if (stop.transportJobId) {
             const jobId = typeof stop.transportJobId === 'object'
               ? (stop.transportJobId._id || stop.transportJobId.id)

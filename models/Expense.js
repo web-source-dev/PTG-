@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const expenseSchema = new mongoose.Schema({
   type: {
     type: String,
-    enum: ['fuel', 'maintenance'],
+    enum: ['fuel', 'maintenance', 'hotel', 'meal', 'toll', 'parking', 'other'],
     required: true
   },
 
