@@ -141,7 +141,12 @@ exports.getAllTransportJobs = async (req, res) => {
     let query = {};
 
     if (status) {
-      query.status = status;
+      // Handle both single status and array of statuses
+      if (Array.isArray(status)) {
+        query.status = { $in: status };
+      } else {
+        query.status = status;
+      }
     }
 
     if (carrier) {

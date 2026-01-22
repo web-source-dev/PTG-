@@ -306,9 +306,12 @@ exports.getAllRoutes = async (req, res) => {
     let query = {};
 
     if (status) {
-      // Handle comma-separated status values
-      const statusArray = status.split(',').map(s => s.trim());
-      if (statusArray.length > 1) {
+      // Handle both single status, comma-separated string, and array of statuses
+      if (Array.isArray(status)) {
+        query.status = { $in: status };
+      } else if (status.includes(',')) {
+        // Handle comma-separated status values for backward compatibility
+        const statusArray = status.split(',').map(s => s.trim());
         query.status = { $in: statusArray };
       } else {
         query.status = status;
