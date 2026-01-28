@@ -365,7 +365,7 @@ exports.updateMyRoute = async (req, res) => {
         return originalStop && originalStop.status !== 'Completed';
       });
 
-     // If a stop was just completed, set the next pending stop to "In Progress"
+      // If a stop was just completed, set the next pending stop to "In Progress"
       if (newlyCompletedStops.length > 0) {
         const inProgressStops = sortedUpdatedStops.filter(s => s.status === 'In Progress');
 

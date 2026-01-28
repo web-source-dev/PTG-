@@ -462,6 +462,38 @@ exports.updateRoute = async (req, res) => {
 
       // Update all related statuses (transport jobs, vehicles)
       await updateStatusOnRouteStatusChange(route._id, updateData.status, route.status);
+
+      // If route status is changing to "In Progress", automatically set first stop to "In Progress"
+      if (updateData.status === 'In Progress' && route.status !== 'In Progress') {
+        if (route.stops && route.stops.length > 0) {
+          // Sort stops by sequence
+          const sortedStops = [...route.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+          // Find first pending stop and set it to "In Progress"
+          const firstPendingStop = sortedStops.find(s => !s.status || s.status === 'Pending');
+          if (firstPendingStop) {
+            // Update the stops array
+            if (!updateData.stops) {
+              updateData.stops = route.stops.map(s => {
+                if (s._id && s._id.toString() === firstPendingStop._id.toString()) {
+                  const stopObj = s.toObject ? s.toObject() : s;
+                  return { ...stopObj, status: 'In Progress' };
+                }
+                return s.toObject ? s.toObject() : s;
+              });
+            } else {
+              // If stops are being updated, find and update the first pending one
+              updateData.stops = updateData.stops.map(s => {
+                const stopId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+                const firstPendingId = firstPendingStop._id ? firstPendingStop._id.toString() : (firstPendingStop.id ? firstPendingStop.id.toString() : null);
+                if (stopId && firstPendingId && stopId === firstPendingId) {
+                  return { ...s, status: 'In Progress' };
+                }
+                return s;
+              });
+            }
+          }
+        }
+      }
     }
 
     // Handle selectedTransportJobs updates
@@ -593,6 +625,50 @@ exports.updateRoute = async (req, res) => {
 
       // Check for stop status changes and update related statuses
       const originalStops = route.stops || [];
+      const sortedOriginalStops = [...originalStops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+      const sortedUpdatedStops = [...updateData.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+
+      // Find stops that were just marked as completed
+      const newlyCompletedStops = sortedUpdatedStops.filter(updatedStop => {
+        const updatedStatus = updatedStop.status;
+        if (updatedStatus !== 'Completed') return false;
+
+        // Find corresponding original stop
+        const originalStop = sortedOriginalStops.find(orig => {
+          const origId = orig._id ? orig._id.toString() : (orig.id ? orig.id.toString() : null);
+          const updatedId = updatedStop._id ? updatedStop._id.toString() : (updatedStop.id ? updatedStop.id.toString() : null);
+          return origId && updatedId && origId === updatedId;
+        });
+
+        // Check if status changed from non-Completed to Completed
+        return originalStop && originalStop.status !== 'Completed';
+      });
+
+      // If a stop was just completed, set the next pending stop to "In Progress"
+      if (newlyCompletedStops.length > 0) {
+        const inProgressStops = sortedUpdatedStops.filter(s => s.status === 'In Progress');
+
+        // Only set next stop to "In Progress" if there's no stop currently in progress
+        if (inProgressStops.length === 0) {
+          const nextPendingStop = sortedUpdatedStops.find(s => {
+            const status = s.status;
+            return !status || status === 'Pending';
+          });
+
+          if (nextPendingStop) {
+            const stopIndex = updateData.stops.findIndex(s => {
+              const stopId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+              const pendingId = nextPendingStop._id ? nextPendingStop._id.toString() : (nextPendingStop.id ? nextPendingStop.id.toString() : null);
+              return stopId && pendingId && stopId === pendingId;
+            });
+
+            if (stopIndex !== -1) {
+              updateData.stops[stopIndex].status = 'In Progress';
+            }
+          }
+        }
+      }
+
       for (let index = 0; index < updateData.stops.length; index++) {
         const updatedStop = updateData.stops[index];
         const originalStop = originalStops.find(s => {
