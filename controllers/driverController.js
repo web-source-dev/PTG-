@@ -365,9 +365,30 @@ exports.updateMyRoute = async (req, res) => {
         return originalStop && originalStop.status !== 'Completed';
       });
 
-      // Allow drivers to complete stops in any order - removed automatic next stop activation
-      // Drivers can manually set any stop to "In Progress" using the "Start Stop" button
-      // This allows flexibility for completing vehicles out of sequence
+     // If a stop was just completed, set the next pending stop to "In Progress"
+      if (newlyCompletedStops.length > 0) {
+        const inProgressStops = sortedUpdatedStops.filter(s => s.status === 'In Progress');
+
+        // Only set next stop to "In Progress" if there's no stop currently in progress
+        if (inProgressStops.length === 0) {
+          const nextPendingStop = sortedUpdatedStops.find(s => {
+            const status = s.status;
+            return !status || status === 'Pending';
+          });
+
+          if (nextPendingStop) {
+            const stopIndex = updateData.stops.findIndex(s => {
+              const stopId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+              const pendingId = nextPendingStop._id ? nextPendingStop._id.toString() : (nextPendingStop.id ? nextPendingStop.id.toString() : null);
+              return stopId && pendingId && stopId === pendingId;
+            });
+
+            if (stopIndex !== -1) {
+              updateData.stops[stopIndex].status = 'In Progress';
+            }
+          }
+        }
+      }
 
       
       // Log photo uploads, checklist completions, and stop completions
