@@ -18,7 +18,7 @@ const corsOptions = {
     'https://ptg-khaki.vercel.app',
     'http://localhost:3000',
     'http://localhost:3001',
-    'http://192.168.1.3:3000',
+    'http://192.168.1.2:3000',
     'https://dashboard.premiumtransportgroup.com',
     'https://premiumtransportgroup.com',
     'https://shawnee-audible-mariann.ngrok-free.dev',

@@ -234,6 +234,17 @@ exports.updateMyRoute = async (req, res) => {
 
           // Initialize route tracking
           await routeTracker.initializeTracking(routeId, req.user._id, route.truckId, startAuditLog._id);
+          
+          // Add location entry for start action if location is provided
+          if (req.body.currentLocation) {
+            await routeTracker.addLocationEntry(
+              routeId,
+              req.body.currentLocation.latitude,
+              req.body.currentLocation.longitude,
+              req.body.currentLocation.accuracy,
+              startAuditLog._id
+            );
+          }
           break;
         case 'stop_route':
           updateData.state = ROUTE_STATE.STOPPED;
@@ -586,6 +597,10 @@ exports.updateMyRoute = async (req, res) => {
 
     updateData.lastUpdatedBy = req.user._id;
 
+    // Check route status before update to determine if tracking should be active
+    const routeStatusBeforeUpdate = route.status;
+    const willBeInProgress = updateData.status === 'In Progress' || (routeStatusBeforeUpdate === 'In Progress' && !updateData.status);
+
     const updatedRoute = await Route.findByIdAndUpdate(
       routeId,
       updateData,
@@ -666,6 +681,46 @@ exports.updateMyRoute = async (req, res) => {
 
     if (needsSave) {
       await updatedRoute.save();
+    }
+
+    // Add location entry to route tracking if location is provided and route is/will be active
+    // This captures location for general route updates (not just actions)
+    // Check both the updated route status and if it will be in progress
+    const routeIsActive = (updatedRoute && updatedRoute.status === 'In Progress') || willBeInProgress;
+    
+    if (req.body.currentLocation && routeIsActive) {
+      try {
+        const location = req.body.currentLocation;
+        console.log(`📍 Attempting to add location entry to route tracking for route ${routeId}:`, {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy,
+          routeStatus: updatedRoute?.status,
+          willBeInProgress: willBeInProgress
+        });
+        
+        await routeTracker.addLocationEntry(
+          routeId,
+          location.latitude,
+          location.longitude,
+          location.accuracy || null,
+          null // No specific audit log for general location updates
+        );
+        console.log(`✅ Successfully added location entry to route tracking for route ${routeId}`);
+      } catch (locationError) {
+        console.error('❌ Error adding location entry to route tracking:', locationError);
+        // Don't fail the route update if location tracking fails
+      }
+    } else {
+      if (req.body.currentLocation) {
+        console.log(`⚠️ Location provided but not added to tracking:`, {
+          hasLocation: !!req.body.currentLocation,
+          routeStatus: updatedRoute?.status,
+          routeExists: !!updatedRoute,
+          willBeInProgress: willBeInProgress,
+          routeIsActive: routeIsActive
+        });
+      }
     }
 
     // Handle stop updates after save - update statuses for transport jobs and vehicles

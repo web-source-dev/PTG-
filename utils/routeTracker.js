@@ -60,23 +60,56 @@ class RouteTrackerService {
    */
   async addLocationEntry(routeId, latitude, longitude, accuracy = null, auditLogId = null) {
     try {
+      console.log(`📍 addLocationEntry called for route ${routeId}:`, { latitude, longitude, accuracy });
+      
       let tracker = this.activeTrackers.get(routeId);
 
       if (!tracker) {
         tracker = await RouteTracking.findOne({ routeId });
         if (tracker) {
           this.activeTrackers.set(routeId, tracker);
+          console.log(`📍 Found existing tracker for route ${routeId}, status: ${tracker.status}`);
         }
       }
 
       if (!tracker || tracker.status !== 'active') {
+        console.log(`📍 Tracker not found or not active for route ${routeId}, attempting to initialize...`);
         // Try to initialize tracking if it doesn't exist
-        const user = await User.findOne({ currentRouteId: routeId });
-        if (user && user.role === 'ptgDriver') {
+        // First try to find driver by currentRouteId
+        let user = await User.findOne({ currentRouteId: routeId });
+        
+        // If not found, try to get driver from route
+        if (!user) {
+          const Route = require('../models/Route');
+          const route = await Route.findById(routeId).populate('driverId');
+          if (route && route.driverId) {
+            user = route.driverId;
+            console.log(`📍 Found driver from route: ${user._id}`);
+          }
+        }
+        
+        if (user && (user.role === 'ptgDriver' || user.role === 'ptgDriver')) {
+          console.log(`📍 Initializing tracking for route ${routeId} with driver ${user._id}`);
           tracker = await this.initializeTracking(routeId, user._id, null, auditLogId);
         } else {
-          return; // Cannot initialize without driver info
+          console.log(`⚠️ Cannot initialize tracking - no driver found for route ${routeId}`);
+          // Try to create tracker anyway with route info
+          const Route = require('../models/Route');
+          const route = await Route.findById(routeId);
+          if (route && route.driverId) {
+            const driverId = typeof route.driverId === 'object' ? route.driverId._id : route.driverId;
+            const truckId = route.truckId ? (typeof route.truckId === 'object' ? route.truckId._id : route.truckId) : null;
+            console.log(`📍 Initializing tracking using route driver info: ${driverId}`);
+            tracker = await this.initializeTracking(routeId, driverId, truckId, auditLogId);
+          } else {
+            return null; // Cannot initialize without driver info
+          }
         }
+      }
+
+      if (!tracker) {
+        console.error(`❌ Tracker still not available after initialization attempt for route ${routeId}`);
+        return null;
       }
 
       const locationEntry = {
@@ -84,20 +117,33 @@ class RouteTrackerService {
         timestamp: new Date(),
         latitude,
         longitude,
-        accuracy,
-        refId: auditLogId,
-        refType: 'AuditLog'
+        accuracy: accuracy || undefined,
+        refId: auditLogId || undefined,
+        refType: auditLogId ? 'AuditLog' : undefined
       };
 
       tracker.history.push(locationEntry);
       const savedTracker = await tracker.save();
 
-      console.log(`📍 Added location entry to route ${routeId}:`, locationEntry);
+      console.log(`✅ Added location entry to route ${routeId}:`, {
+        latitude: locationEntry.latitude,
+        longitude: locationEntry.longitude,
+        accuracy: locationEntry.accuracy,
+        timestamp: locationEntry.timestamp
+      });
       console.log(`📍 Route tracker history length: ${savedTracker.history.length}`);
 
       return locationEntry;
     } catch (error) {
-      console.error('Error adding location entry:', error);
+      console.error('❌ Error adding location entry:', error);
+      console.error('Error details:', {
+        routeId,
+        latitude,
+        longitude,
+        accuracy,
+        errorMessage: error.message,
+        errorStack: error.stack
+      });
       throw error;
     }
   }
