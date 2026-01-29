@@ -58,6 +58,10 @@ const routeSchema = new mongoose.Schema({
       type: String,
       trim: true
     },
+    formattedAddress: {
+      type: String,
+      trim: true
+    },
     coordinates: {
       latitude: Number,
       longitude: Number
@@ -81,6 +85,10 @@ const routeSchema = new mongoose.Schema({
       trim: true
     },
     zip: {
+      type: String,
+      trim: true
+    },
+    formattedAddress: {
       type: String,
       trim: true
     },
@@ -141,6 +149,10 @@ const routeSchema = new mongoose.Schema({
         trim: true
       },
       zip: {
+        type: String,
+        trim: true
+      },
+      formattedAddress: {
         type: String,
         trim: true
       },
@@ -335,8 +347,10 @@ routeSchema.index({ 'stops.transportJobId': 1 });
 routeSchema.index({ 'stops.sequence': 1 });
 routeSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to generate route number and initialize checklists
+// Pre-save middleware to generate route number, initialize checklists, and populate formattedAddress
 routeSchema.pre('save', async function(next) {
+  const locationService = require('../utils/locationService');
+  
   if (this.isNew && !this.routeNumber) {
     const date = new Date();
     const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
@@ -349,12 +363,26 @@ routeSchema.pre('save', async function(next) {
     this.routeNumber = `RT-${dateStr}-${String(count + 1).padStart(3, '0')}`;
   }
 
-  // Initialize checklists for stops that don't have them
+  // Populate formattedAddress for journeyStartLocation
+  if (this.journeyStartLocation) {
+    locationService.populateFormattedAddress(this.journeyStartLocation);
+  }
+
+  // Populate formattedAddress for journeyEndLocation
+  if (this.journeyEndLocation) {
+    locationService.populateFormattedAddress(this.journeyEndLocation);
+  }
+
+  // Initialize checklists and populate formattedAddress for stops
   if (this.stops && Array.isArray(this.stops)) {
     const { getDefaultChecklist } = require('../utils/checklistDefaults');
     this.stops.forEach(stop => {
       if (!stop.checklist || stop.checklist.length === 0) {
         stop.checklist = getDefaultChecklist(stop.stopType);
+      }
+      // Populate formattedAddress for stop location
+      if (stop.location) {
+        locationService.populateFormattedAddress(stop.location);
       }
     });
   }

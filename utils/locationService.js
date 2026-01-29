@@ -425,14 +425,118 @@ class LocationService {
    * @param {Object} location - Location object
    * @returns {string} Formatted address
    */
-  buildAddress(location) {
-    const parts = [];
-    if (location.address) parts.push(location.address);
-    if (location.city) parts.push(location.city);
-    if (location.state) parts.push(location.state);
-    if (location.zip) parts.push(location.zip);
+  /**
+   * Populate formattedAddress field in a location object if not already present
+   * @param {Object} location - Location object to populate
+   * @returns {Object} Location object with formattedAddress populated
+   */
+  populateFormattedAddress(location) {
+    if (!location) return location;
+    
+    // Normalize zipCode to zip if zipCode exists but zip doesn't
+    if (location.zipCode && !location.zip) {
+      location.zip = location.zipCode;
+    }
+    
+    // Extract zip from address if zip is not provided but address contains a zip pattern
+    if (!location.zip && location.address) {
+      // Match US zip code pattern (5 digits or 5+4 format) at the end of address
+      const zipMatch = location.address.match(/\b(\d{5}(?:-\d{4})?)\b/);
+      if (zipMatch) {
+        location.zip = zipMatch[1];
+      }
+    }
+    
+    // If formattedAddress already exists, keep it
+    if (location.formattedAddress) return location;
+    
+    // Generate formattedAddress using buildAddress
+    const formatted = this.buildAddress(location);
+    if (formatted) {
+      location.formattedAddress = formatted;
+    }
+    
+    return location;
+  }
 
-    return parts.join(', ');
+  /**
+   * Build formatted address string from location object
+   * Format: "Address, City, State ZIP"
+   * @param {Object} location - Location object with address, name, city, state, zip fields
+   * @returns {string} Formatted address
+   */
+  buildAddress(location) {
+    if (!location) return '';
+    
+    const address = (location.address || '').trim();
+    const name = (location.name || '').trim();
+    const city = (location.city || '').trim();
+    const state = (location.state || '').trim();
+    const zip = (location.zip || location.zipCode || '').trim();
+    
+    // Normalize for comparison (lowercase, remove extra spaces, punctuation)
+    const normalize = (str) => str.toLowerCase().replace(/[,\s]+/g, ' ').trim();
+    const addressNorm = normalize(address);
+    const nameNorm = normalize(name);
+    const cityNorm = normalize(city);
+    const stateNorm = normalize(state);
+    const zipNorm = normalize(zip);
+    
+    // Check if address already contains city and state
+    const addressContainsCity = city && addressNorm && addressNorm.includes(cityNorm);
+    const addressContainsState = state && addressNorm && addressNorm.includes(stateNorm);
+    const addressContainsZip = zip && addressNorm && addressNorm.includes(zipNorm);
+    
+    // Check if name already contains city and state
+    const nameContainsCity = city && nameNorm && nameNorm.includes(cityNorm);
+    const nameContainsState = state && nameNorm && nameNorm.includes(stateNorm);
+    const nameContainsZip = zip && nameNorm && nameNorm.includes(zipNorm);
+    
+    // If address exists and already contains city AND state, use it as-is (clean up USA)
+    if (address && addressContainsCity && addressContainsState) {
+      // Remove trailing ", USA" and any duplicate patterns
+      let cleaned = address.replace(/,\s*USA\s*,?\s*$/i, '').trim();
+      // Remove trailing duplicate city/state/zip if present
+      if (city && state) {
+        const duplicatePattern = new RegExp(`,\\s*${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,\\s*${state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s*,\\s*${zip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})?\\s*$`, 'i');
+        cleaned = cleaned.replace(duplicatePattern, '').trim();
+      }
+      return cleaned;
+    }
+    
+    // If name exists and already contains city AND state, use it as-is
+    if (!address && name && nameContainsCity && nameContainsState) {
+      return name;
+    }
+    
+    // Build the result - only add what's missing
+    const parts = [];
+    
+    // Add address or name first
+    if (address) {
+      parts.push(address);
+    } else if (name) {
+      parts.push(name);
+    }
+    
+    // Only add city/state/zip if they're not already in address or name
+    const shouldAddCity = city && !addressContainsCity && !nameContainsCity;
+    const shouldAddState = state && !addressContainsState && !nameContainsState;
+    const shouldAddZip = zip && !addressContainsZip && !nameContainsZip;
+    
+    if (shouldAddCity || shouldAddState || shouldAddZip) {
+      const cityState = [shouldAddCity ? city : '', shouldAddState ? state : ''].filter(Boolean).join(', ');
+      const cityStateZip = shouldAddZip && cityState ? `${cityState} ${zip}` : (shouldAddZip ? zip : cityState);
+      
+      if (cityStateZip) {
+        parts.push(cityStateZip);
+      }
+    }
+    
+    const result = parts.join(', ').trim();
+    
+    // Final cleanup: remove any trailing ", USA" and trim
+    return result.replace(/,\s*USA\s*,?\s*$/i, '').trim();
   }
 
   /**

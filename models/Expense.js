@@ -58,7 +58,7 @@ const expenseSchema = new mongoose.Schema({
     longitude: Number,
     accuracy: Number,
     // Text fields for the location the user typed/selected
-    formattedAddress: String,
+    formattedAddress: String, // Complete formatted address: "Address, City, State ZIP"
     name: String,
     address: String,
     city: String,
@@ -101,5 +101,14 @@ expenseSchema.index({ driverId: 1, type: 1 });
 expenseSchema.index({ truckId: 1, type: 1 });
 expenseSchema.index({ routeId: 1 });
 expenseSchema.index({ createdAt: -1 });
+
+// Pre-save middleware to populate formattedAddress for askedLocation
+expenseSchema.pre('save', function(next) {
+  if (this.askedLocation && (this.askedLocation.address || this.askedLocation.city || this.askedLocation.state)) {
+    const locationService = require('../utils/locationService');
+    locationService.populateFormattedAddress(this.askedLocation);
+  }
+  next();
+});
 
 module.exports = mongoose.model('Expense', expenseSchema);

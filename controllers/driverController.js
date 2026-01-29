@@ -336,7 +336,6 @@ exports.updateMyRoute = async (req, res) => {
 
     // If updating stops, ensure sequence is maintained and validate
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
-
       updateData.stops.forEach((stop, index) => {
         if (stop.sequence === undefined) {
           stop.sequence = index + 1;
@@ -390,7 +389,6 @@ exports.updateMyRoute = async (req, res) => {
         }
       }
 
-      
       // Log photo uploads, checklist completions, and stop completions
       for (let i = 0; i < sortedUpdatedStops.length; i++) {
         const updatedStop = sortedUpdatedStops[i];

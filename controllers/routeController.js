@@ -13,7 +13,8 @@ const {
   updateStatusOnStopsSetup,
   updateStatusOnRouteStatusChange,
   updateStatusOnTransportJobRemoved,
-  updateStatusOnStopUpdate
+  updateStatusOnStopUpdate,
+  syncRouteStopToTransportJob
 } = require('../utils/statusManager');
 
 /**
@@ -36,17 +37,27 @@ exports.createRoute = async (req, res) => {
 
     // Auto-create start stop if journeyStartLocation is provided
     if (routeData.journeyStartLocation && routeData.journeyStartLocation.name) {
+      const startLocation = {
+        name: routeData.journeyStartLocation.name,
+        address: routeData.journeyStartLocation.address,
+        city: routeData.journeyStartLocation.city,
+        state: routeData.journeyStartLocation.state,
+        zip: routeData.journeyStartLocation.zip || routeData.journeyStartLocation.zipCode, // Support both zip and zipCode
+        formattedAddress: routeData.journeyStartLocation.formattedAddress,
+        coordinates: routeData.journeyStartLocation.coordinates
+      };
+      // populateFormattedAddress will extract zip from address if not provided and normalize zipCode to zip
+      locationService.populateFormattedAddress(startLocation);
+      
+      // Ensure journeyStartLocation also has the zip populated
+      if (startLocation.zip && !routeData.journeyStartLocation.zip) {
+        routeData.journeyStartLocation.zip = startLocation.zip;
+      }
+      
       const startStop = {
         stopType: 'start',
         sequence: 1,
-        location: {
-          name: routeData.journeyStartLocation.name,
-          address: routeData.journeyStartLocation.address,
-          city: routeData.journeyStartLocation.city,
-          state: routeData.journeyStartLocation.state,
-          zip: routeData.journeyStartLocation.zip,
-          coordinates: routeData.journeyStartLocation.coordinates
-        },
+        location: startLocation,
         scheduledDate: routeData.plannedStartDate,
         scheduledTimeStart: routeData.plannedStartDate,
         status: 'Pending'
@@ -61,17 +72,27 @@ exports.createRoute = async (req, res) => {
 
     // Auto-create end stop if journeyEndLocation is provided
     if (routeData.journeyEndLocation && routeData.journeyEndLocation.name) {
+      const endLocation = {
+        name: routeData.journeyEndLocation.name,
+        address: routeData.journeyEndLocation.address,
+        city: routeData.journeyEndLocation.city,
+        state: routeData.journeyEndLocation.state,
+        zip: routeData.journeyEndLocation.zip || routeData.journeyEndLocation.zipCode, // Support both zip and zipCode
+        formattedAddress: routeData.journeyEndLocation.formattedAddress,
+        coordinates: routeData.journeyEndLocation.coordinates
+      };
+      // populateFormattedAddress will extract zip from address if not provided and normalize zipCode to zip
+      locationService.populateFormattedAddress(endLocation);
+      
+      // Ensure journeyEndLocation also has the zip populated
+      if (endLocation.zip && !routeData.journeyEndLocation.zip) {
+        routeData.journeyEndLocation.zip = endLocation.zip;
+      }
+      
       const endStop = {
         stopType: 'end',
         sequence: routeData.stops.length + 1,
-        location: {
-          name: routeData.journeyEndLocation.name,
-          address: routeData.journeyEndLocation.address,
-          city: routeData.journeyEndLocation.city,
-          state: routeData.journeyEndLocation.state,
-          zip: routeData.journeyEndLocation.zip,
-          coordinates: routeData.journeyEndLocation.coordinates
-        },
+        location: endLocation,
         scheduledDate: routeData.plannedEndDate,
         scheduledTimeStart: routeData.plannedEndDate,
         status: 'Pending'
@@ -443,6 +464,21 @@ exports.updateRoute = async (req, res) => {
       });
     }
 
+    // Populate formattedAddress for journey locations if updated
+    // Also normalize zipCode to zip
+    if (updateData.journeyStartLocation) {
+      if (updateData.journeyStartLocation.zipCode && !updateData.journeyStartLocation.zip) {
+        updateData.journeyStartLocation.zip = updateData.journeyStartLocation.zipCode;
+      }
+      locationService.populateFormattedAddress(updateData.journeyStartLocation);
+    }
+    if (updateData.journeyEndLocation) {
+      if (updateData.journeyEndLocation.zipCode && !updateData.journeyEndLocation.zip) {
+        updateData.journeyEndLocation.zip = updateData.journeyEndLocation.zipCode;
+      }
+      locationService.populateFormattedAddress(updateData.journeyEndLocation);
+    }
+
     // Handle status updates if route status changes
     if (updateData.status && updateData.status !== route.status) {
       // Update truck status
@@ -462,38 +498,6 @@ exports.updateRoute = async (req, res) => {
 
       // Update all related statuses (transport jobs, vehicles)
       await updateStatusOnRouteStatusChange(route._id, updateData.status, route.status);
-
-      // If route status is changing to "In Progress", automatically set first stop to "In Progress"
-      if (updateData.status === 'In Progress' && route.status !== 'In Progress') {
-        if (route.stops && route.stops.length > 0) {
-          // Sort stops by sequence
-          const sortedStops = [...route.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
-          // Find first pending stop and set it to "In Progress"
-          const firstPendingStop = sortedStops.find(s => !s.status || s.status === 'Pending');
-          if (firstPendingStop) {
-            // Update the stops array
-            if (!updateData.stops) {
-              updateData.stops = route.stops.map(s => {
-                if (s._id && s._id.toString() === firstPendingStop._id.toString()) {
-                  const stopObj = s.toObject ? s.toObject() : s;
-                  return { ...stopObj, status: 'In Progress' };
-                }
-                return s.toObject ? s.toObject() : s;
-              });
-            } else {
-              // If stops are being updated, find and update the first pending one
-              updateData.stops = updateData.stops.map(s => {
-                const stopId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
-                const firstPendingId = firstPendingStop._id ? firstPendingStop._id.toString() : (firstPendingStop.id ? firstPendingStop.id.toString() : null);
-                if (stopId && firstPendingId && stopId === firstPendingId) {
-                  return { ...s, status: 'In Progress' };
-                }
-                return s;
-              });
-            }
-          }
-        }
-      }
     }
 
     // Handle selectedTransportJobs updates
@@ -566,7 +570,7 @@ exports.updateRoute = async (req, res) => {
         });
       }
 
-      // Ensure sequence is set for all stops and initialize checklists
+      // Ensure sequence is set for all stops, initialize checklists, and populate formattedAddress
       const { getDefaultChecklist } = require('../utils/checklistDefaults');
       updateData.stops.forEach((stop, index) => {
         if (stop.sequence === undefined) {
@@ -575,6 +579,10 @@ exports.updateRoute = async (req, res) => {
         // Initialize checklist if not provided
         if (!stop.checklist || stop.checklist.length === 0) {
           stop.checklist = getDefaultChecklist(stop.stopType);
+        }
+        // Populate formattedAddress for stop location
+        if (stop.location) {
+          locationService.populateFormattedAddress(stop.location);
         }
       });
 
@@ -624,6 +632,7 @@ exports.updateRoute = async (req, res) => {
       // This ensures we use the updated stops data
 
       // Check for stop status changes and update related statuses
+      // Also handle automatic next stop activation when a stop is completed
       const originalStops = route.stops || [];
       const sortedOriginalStops = [...originalStops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
       const sortedUpdatedStops = [...updateData.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
@@ -707,6 +716,105 @@ exports.updateRoute = async (req, res) => {
         runValidators: true
       }
     );
+
+    // Sync route stop location changes to transport jobs BEFORE saving the route
+    if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
+      console.log(`🔄 Checking ${updateData.stops.length} stops for transport job sync`);
+      const originalStops = route.stops || [];
+
+      for (let index = 0; index < updateData.stops.length; index++) {
+        const updatedStop = updateData.stops[index];
+
+        // Check if this is a pickup or drop stop with transport job
+        if (updatedStop && (updatedStop.stopType === 'pickup' || updatedStop.stopType === 'drop') && updatedStop.transportJobId) {
+          console.log(`🔍 Processing ${updatedStop.stopType} stop with transport job ${updatedStop.transportJobId}`);
+
+          // Find original stop - try multiple ways to match
+          let originalStop = null;
+          const updatedId = updatedStop._id || updatedStop.id;
+          if (updatedId) {
+            originalStop = originalStops.find(s => {
+              const origId = s._id || s.id;
+              return origId && origId.toString() === updatedId.toString();
+            });
+          }
+
+          // If no ID match, try sequence-based matching for stops that have sequence
+          if (!originalStop && updatedStop.sequence) {
+            originalStop = originalStops.find(s => s.sequence === updatedStop.sequence);
+          }
+
+          const hasLocationChanges = !originalStop ||
+            !originalStop.location ||
+            !updatedStop.location ||
+            JSON.stringify(originalStop.location) !== JSON.stringify(updatedStop.location);
+
+          console.log(`📍 Stop ${updatedStop._id || updatedStop.id || updatedStop.sequence}: hasLocationChanges=${hasLocationChanges}, originalStop=${!!originalStop}`);
+
+          if (hasLocationChanges && updatedStop.location) {
+            try {
+              // Directly sync the location data to transport job
+              const jobId = typeof updatedStop.transportJobId === 'object'
+                ? updatedStop.transportJobId._id || updatedStop.transportJobId.id
+                : updatedStop.transportJobId;
+
+              const updateData = {};
+              if (updatedStop.stopType === 'pickup') {
+                updateData.pickupLocationName = updatedStop.location.name;
+                updateData.pickupCity = updatedStop.location.city;
+                updateData.pickupState = updatedStop.location.state;
+                updateData.pickupZip = updatedStop.location.zip;
+                // Populate formattedAddress if available from stop location, otherwise generate it
+                if (updatedStop.location.formattedAddress) {
+                  updateData.pickupFormattedAddress = updatedStop.location.formattedAddress;
+                } else {
+                  const pickupLocation = {
+                    name: updatedStop.location.name,
+                    city: updatedStop.location.city,
+                    state: updatedStop.location.state,
+                    zip: updatedStop.location.zip
+                  };
+                  locationService.populateFormattedAddress(pickupLocation);
+                  if (pickupLocation.formattedAddress) {
+                    updateData.pickupFormattedAddress = pickupLocation.formattedAddress;
+                  }
+                }
+              } else if (updatedStop.stopType === 'drop') {
+                updateData.dropLocationName = updatedStop.location.name;
+                updateData.dropCity = updatedStop.location.city;
+                updateData.dropState = updatedStop.location.state;
+                updateData.dropZip = updatedStop.location.zip;
+                // Populate formattedAddress if available from stop location, otherwise generate it
+                if (updatedStop.location.formattedAddress) {
+                  updateData.dropFormattedAddress = updatedStop.location.formattedAddress;
+                } else {
+                  const dropLocation = {
+                    name: updatedStop.location.name,
+                    city: updatedStop.location.city,
+                    state: updatedStop.location.state,
+                    zip: updatedStop.location.zip
+                  };
+                  locationService.populateFormattedAddress(dropLocation);
+                  if (dropLocation.formattedAddress) {
+                    updateData.dropFormattedAddress = dropLocation.formattedAddress;
+                  }
+                }
+              }
+
+              if (Object.keys(updateData).length > 0) {
+                await TransportJob.findByIdAndUpdate(jobId, updateData);
+                console.log(`✅ Synced location changes directly to transport job ${jobId}:`, updateData);
+              }
+            } catch (syncError) {
+              console.error('Failed to sync route stop to transport job:', syncError);
+              // Don't fail the route update if sync fails
+            }
+          } else {
+            console.log(`ℹ️ No location changes detected for stop ${updatedStop._id || updatedStop.id || updatedStop.sequence}`);
+          }
+        }
+      }
+    }
 
     // Check if stops are being added/updated (stops setup) - AFTER route is saved
     // If stops have transportJobId and route is still "Planned", update transport jobs and vehicles

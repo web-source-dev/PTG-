@@ -17,6 +17,9 @@ router.get('/vin/:vin', vehicleController.getVehicleByVin);
 // POST /api/vehicles - Create new vehicle
 router.post('/', vehicleController.createVehicle);
 
+// POST /api/vehicles/import-vos - Import vehicle from VOS Central Dispatch
+router.post('/import-vos', vehicleController.importFromVOS);
+
 // GET /api/vehicles/:id - Get single vehicle
 router.get('/:id', vehicleController.getVehicleById);
 

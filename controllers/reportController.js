@@ -365,7 +365,7 @@ exports.getRouteReport = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year status')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment centralDispatchLoadId',
+        select: 'jobNumber status vehicleId carrier carrierPayment',
         populate: {
           path: 'vehicleId',
           select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip'
@@ -373,7 +373,7 @@ exports.getRouteReport = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        select: 'jobNumber status vehicleId carrier carrierPayment centralDispatchLoadId',
+        select: 'jobNumber status vehicleId carrier carrierPayment',
         populate: {
           path: 'vehicleId',
           select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip'

@@ -31,18 +31,106 @@ const transportJobSchema = new mongoose.Schema({
     trim: true
   },
 
-  // Central Dispatch
-  centralDispatchLoadId: {
+  // Transport Purpose (for recurring transports)
+  transportPurpose: {
+    type: String,
+    enum: ['initial_delivery', 'relocation', 'dealer_transfer', 'auction', 'service', 'redistribution'],
+    default: 'initial_delivery'
+  },
+
+  // Pickup Information
+  pickupLocationName: {
     type: String,
     trim: true
   },
-  centralDispatchPosted: {
-    type: Boolean,
-    default: false
+  pickupCity: {
+    type: String,
+    trim: true
   },
-  centralDispatchPostedAt: {
+  pickupState: {
+    type: String,
+    trim: true
+  },
+  pickupZip: {
+    type: String,
+    trim: true
+  },
+  pickupFormattedAddress: {
+    type: String,
+    trim: true
+  },
+  pickupContactName: {
+    type: String,
+    trim: true
+  },
+  pickupContactPhone: {
+    type: String,
+    trim: true
+  },
+  pickupDateStart: {
     type: Date
   },
+  pickupDateEnd: {
+    type: Date
+  },
+  pickupTimeStart: {
+    type: String,
+    trim: true
+  },
+  pickupTimeEnd: {
+    type: String,
+    trim: true
+  },
+
+  // Drop Information
+  dropDestinationType: {
+    type: String,
+    enum: ['PF', 'Auction', 'Other'],
+    trim: true
+  },
+  dropLocationName: {
+    type: String,
+    trim: true
+  },
+  dropCity: {
+    type: String,
+    trim: true
+  },
+  dropState: {
+    type: String,
+    trim: true
+  },
+  dropZip: {
+    type: String,
+    trim: true
+  },
+  dropFormattedAddress: {
+    type: String,
+    trim: true
+  },
+  dropContactName: {
+    type: String,
+    trim: true
+  },
+  dropContactPhone: {
+    type: String,
+    trim: true
+  },
+  dropDateStart: {
+    type: Date
+  },
+  dropDateEnd: {
+    type: Date
+  },
+  dropTimeStart: {
+    type: String,
+    trim: true
+  },
+  dropTimeEnd: {
+    type: String,
+    trim: true
+  },
+
 
   // Route Reference (for PTG routes)
   routeId: {
@@ -121,18 +209,6 @@ const transportJobSchema = new mongoose.Schema({
     trim: true
   },
 
-  // Central Dispatch Manual Updates (for info tracking)
-  centralDispatchTruckInfo: {
-    type: String,
-    trim: true
-  },
-  centralDispatchAmount: {
-    type: Number
-  },
-  centralDispatchNotes: {
-    type: String,
-    trim: true
-  },
 
   // Pricing
   carrierPayment: {
@@ -167,11 +243,12 @@ transportJobSchema.index({ vehicleId: 1 });
 transportJobSchema.index({ status: 1 });
 transportJobSchema.index({ carrier: 1 });
 transportJobSchema.index({ routeId: 1 });
-transportJobSchema.index({ centralDispatchLoadId: 1 });
 transportJobSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to generate job number
+// Pre-save middleware to generate job number and populate formattedAddress fields
 transportJobSchema.pre('save', async function(next) {
+  const locationService = require('../utils/locationService');
+  
   if (this.isNew && !this.jobNumber) {
     // Generate job number like TJ-20241222-001
     const date = new Date();
@@ -184,6 +261,35 @@ transportJobSchema.pre('save', async function(next) {
     });
     this.jobNumber = `TJ-${dateStr}-${String(count + 1).padStart(3, '0')}`;
   }
+
+  // Populate pickupFormattedAddress if not already set
+  if (!this.pickupFormattedAddress && (this.pickupLocationName || this.pickupCity || this.pickupState)) {
+    const pickupLocation = {
+      name: this.pickupLocationName,
+      city: this.pickupCity,
+      state: this.pickupState,
+      zip: this.pickupZip
+    };
+    locationService.populateFormattedAddress(pickupLocation);
+    if (pickupLocation.formattedAddress) {
+      this.pickupFormattedAddress = pickupLocation.formattedAddress;
+    }
+  }
+
+  // Populate dropFormattedAddress if not already set
+  if (!this.dropFormattedAddress && (this.dropLocationName || this.dropCity || this.dropState)) {
+    const dropLocation = {
+      name: this.dropLocationName,
+      city: this.dropCity,
+      state: this.dropState,
+      zip: this.dropZip
+    };
+    locationService.populateFormattedAddress(dropLocation);
+    if (dropLocation.formattedAddress) {
+      this.dropFormattedAddress = dropLocation.formattedAddress;
+    }
+  }
+
   next();
 });
 

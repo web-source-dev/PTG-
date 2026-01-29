@@ -7,26 +7,40 @@ const locationService = require('./locationService');
  */
 async function calculateVehicleDistance(vehicle) {
   try {
-    // Build pickup address
+    // Get transport job data from the vehicle
+    let transportJob = null;
+    if (vehicle.currentTransportJobId) {
+      // If currentTransportJobId is populated (object), use it
+      if (typeof vehicle.currentTransportJobId === 'object') {
+        transportJob = vehicle.currentTransportJobId;
+      }
+      // Otherwise, we need to fetch it (but for now, assume it's populated)
+    }
+
+    if (!transportJob) {
+      return null;
+    }
+
+    // Build pickup address from transport job
     const pickupAddress = [
-      vehicle.pickupLocationName,
-      vehicle.pickupCity,
-      vehicle.pickupState,
-      vehicle.pickupZip
+      transportJob.pickupLocationName,
+      transportJob.pickupCity,
+      transportJob.pickupState,
+      transportJob.pickupZip
     ].filter(Boolean).join(', ');
 
-    // Build drop address
+    // Build drop address from transport job
     const dropAddress = [
-      vehicle.dropLocationName,
-      vehicle.dropCity,
-      vehicle.dropState,
-      vehicle.dropZip
+      transportJob.dropLocationName,
+      transportJob.dropCity,
+      transportJob.dropState,
+      transportJob.dropZip
     ].filter(Boolean).join(', ');
 
     // Validate that we have enough information
-    if (!pickupAddress || !dropAddress || 
-        !vehicle.pickupCity || !vehicle.pickupState ||
-        !vehicle.dropCity || !vehicle.dropState) {
+    if (!pickupAddress || !dropAddress ||
+        !transportJob.pickupCity || !transportJob.pickupState ||
+        !transportJob.dropCity || !transportJob.dropState) {
       return null;
     }
 

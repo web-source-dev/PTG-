@@ -21,6 +21,7 @@ const HistorySchema = new mongoose.Schema(
     latitude: Number,
     longitude: Number,
     accuracy: Number,
+    formattedAddress: String, // Complete formatted address: "Address, City, State ZIP"
 
     // 🔗 Audit reference
     refId: {

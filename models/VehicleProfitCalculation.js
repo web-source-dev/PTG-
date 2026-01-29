@@ -10,6 +10,69 @@ const vehicleProfitCalculationSchema = new mongoose.Schema({
     index: true
   },
 
+  // Location Information for Profit Calculation
+  pickupLocationName: {
+    type: String,
+    trim: true
+  },
+  pickupCity: {
+    type: String,
+    trim: true
+  },
+  pickupState: {
+    type: String,
+    trim: true
+  },
+  pickupZip: {
+    type: String,
+    trim: true
+  },
+  pickupFormattedAddress: {
+    type: String,
+    trim: true
+  },
+  pickupContactName: {
+    type: String,
+    trim: true
+  },
+  pickupContactPhone: {
+    type: String,
+    trim: true
+  },
+  dropDestinationType: {
+    type: String,
+    enum: ['PF', 'Auction', 'Other'],
+    default: 'Other'
+  },
+  dropLocationName: {
+    type: String,
+    trim: true
+  },
+  dropCity: {
+    type: String,
+    trim: true
+  },
+  dropState: {
+    type: String,
+    trim: true
+  },
+  dropZip: {
+    type: String,
+    trim: true
+  },
+  dropFormattedAddress: {
+    type: String,
+    trim: true
+  },
+  dropContactName: {
+    type: String,
+    trim: true
+  },
+  dropContactPhone: {
+    type: String,
+    trim: true
+  },
+
   // Miles Information
   milesToLocation: {
     type: Number, // Distance from start/current location to pickup
@@ -95,8 +158,38 @@ const vehicleProfitCalculationSchema = new mongoose.Schema({
 vehicleProfitCalculationSchema.index({ vehicleId: 1 });
 vehicleProfitCalculationSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to calculate derived fields
+// Pre-save middleware to calculate derived fields and populate formattedAddress
 vehicleProfitCalculationSchema.pre('save', function(next) {
+  const locationService = require('../utils/locationService');
+  
+  // Populate pickupFormattedAddress if not already set
+  if (!this.pickupFormattedAddress && (this.pickupLocationName || this.pickupCity || this.pickupState)) {
+    const pickupLocation = {
+      name: this.pickupLocationName,
+      city: this.pickupCity,
+      state: this.pickupState,
+      zip: this.pickupZip
+    };
+    locationService.populateFormattedAddress(pickupLocation);
+    if (pickupLocation.formattedAddress) {
+      this.pickupFormattedAddress = pickupLocation.formattedAddress;
+    }
+  }
+
+  // Populate dropFormattedAddress if not already set
+  if (!this.dropFormattedAddress && (this.dropLocationName || this.dropCity || this.dropState)) {
+    const dropLocation = {
+      name: this.dropLocationName,
+      city: this.dropCity,
+      state: this.dropState,
+      zip: this.dropZip
+    };
+    locationService.populateFormattedAddress(dropLocation);
+    if (dropLocation.formattedAddress) {
+      this.dropFormattedAddress = dropLocation.formattedAddress;
+    }
+  }
+
   // Calculate total gallons
   if (this.totalMiles && this.mpg) {
     this.totalGallons = this.totalMiles / this.mpg;

@@ -55,11 +55,10 @@ exports.globalSearch = async (req, res) => {
       // Transport Jobs
       TransportJob.find({
         $or: [
-          { jobNumber: searchRegex },
-          { centralDispatchLoadId: searchRegex }
+          { jobNumber: searchRegex }
         ]
       })
-      .select('jobNumber status carrier centralDispatchLoadId createdAt')
+      .select('jobNumber status carrier createdAt')
       .populate('vehicleId', 'vin year make model')
       .populate('routeId', 'routeNumber status')
       .limit(searchLimit)
@@ -159,7 +158,6 @@ exports.globalSearch = async (req, res) => {
         details: {
           jobNumber: job.jobNumber,
           carrier: job.carrier,
-          centralDispatchLoadId: job.centralDispatchLoadId,
           vehicle: job.vehicleId,
           route: job.routeId
         },
@@ -287,8 +285,7 @@ exports.advancedSearch = async (req, res) => {
         case 'transportJob':
           query = {
             $or: [
-              { jobNumber: searchRegex },
-              { centralDispatchLoadId: searchRegex }
+              { jobNumber: searchRegex }
             ]
           };
           if (status) query.status = status;
@@ -464,7 +461,6 @@ function formatSearchResult(item, type) {
         details: {
           jobNumber: item.jobNumber,
           carrier: item.carrier,
-          centralDispatchLoadId: item.centralDispatchLoadId,
           vehicle: item.vehicleId,
           route: item.routeId
         },

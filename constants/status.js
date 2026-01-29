@@ -32,7 +32,6 @@ const ROUTE_STATE = {
 // Transport Job Status
 const TRANSPORT_JOB_STATUS = {
   NEEDS_DISPATCH: 'Needs Dispatch',
-  PUBLISHED_TO_CENTRAL_DISPATCH: 'Published to Central Dispatch',
   DISPATCHED: 'Dispatched',
   IN_TRANSIT: 'In Transit',
   DELIVERED: 'Delivered',
@@ -53,7 +52,6 @@ const VEHICLE_STATUS = {
   PURCHASED_INTAKE_NEEDED: 'Purchased – Intake Needed',
   INTAKE_COMPLETE: 'Intake Completed',
   READY_FOR_TRANSPORT: 'Ready for Transport',
-  PUBLISHED_TO_CENTRAL_DISPATCH: 'Published to Central Dispatch',
   IN_TRANSPORT: 'In Transport',
   DELIVERED: 'Delivered',
   CANCELLED: 'Cancelled'
@@ -72,8 +70,7 @@ const ROUTE_STOP_TYPE = {
 
 // Carrier Types
 const CARRIER = {
-  PTG: 'PTG',
-  CENTRAL_DISPATCH: 'Central Dispatch'
+  PTG: 'PTG'
 };
 
 // Get all status enums for API response
@@ -113,7 +110,6 @@ const getAllStatusEnums = () => {
       values: Object.values(TRANSPORT_JOB_STATUS),
       labels: {
         [TRANSPORT_JOB_STATUS.NEEDS_DISPATCH]: 'Needs Dispatch',
-        [TRANSPORT_JOB_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH]: 'Published to Central Dispatch',
         [TRANSPORT_JOB_STATUS.DISPATCHED]: 'Dispatched',
         [TRANSPORT_JOB_STATUS.IN_TRANSIT]: 'In Transit',
         [TRANSPORT_JOB_STATUS.DELIVERED]: 'Delivered',
@@ -136,7 +132,6 @@ const getAllStatusEnums = () => {
         [VEHICLE_STATUS.PURCHASED_INTAKE_NEEDED]: 'Purchased – Intake Needed',
         [VEHICLE_STATUS.INTAKE_COMPLETE]: 'Intake Completed',
         [VEHICLE_STATUS.READY_FOR_TRANSPORT]: 'Ready for Transport',
-        [VEHICLE_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH]: 'Published to Central Dispatch',
         [VEHICLE_STATUS.IN_TRANSPORT]: 'In Transport',
         [VEHICLE_STATUS.DELIVERED]: 'Delivered',
         [VEHICLE_STATUS.CANCELLED]: 'Cancelled'
@@ -154,8 +149,7 @@ const getAllStatusEnums = () => {
     carrier: {
       values: Object.values(CARRIER),
       labels: {
-        [CARRIER.PTG]: 'PTG (Own Service)',
-        [CARRIER.CENTRAL_DISPATCH]: 'Central Dispatch'
+        [CARRIER.PTG]: 'PTG (Own Service)'
       }
     }
   };

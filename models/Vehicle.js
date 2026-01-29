@@ -36,95 +36,6 @@ const vehicleSchema = new mongoose.Schema({
     trim: true
   },
 
-  // Pickup Information
-  pickupLocationName: {
-    type: String,
-    trim: true
-  },
-  pickupCity: {
-    type: String,
-    trim: true
-  },
-  pickupState: {
-    type: String,
-    trim: true
-  },
-  pickupZip: {
-    type: String,
-    trim: true
-  },
-  pickupContactName: {
-    type: String,
-    trim: true
-  },
-  pickupContactPhone: {
-    type: String,
-    trim: true
-  },
-  availableToShipDate: {
-    type: Date
-  },
-  // Pickup Date and Time Range
-  pickupDateStart: {
-    type: Date
-  },
-  pickupDateEnd: {
-    type: Date
-  },
-  pickupTimeStart: {
-    type: String,
-    trim: true
-  },
-  pickupTimeEnd: {
-    type: String,
-    trim: true
-  },
-
-  // Drop Information
-  dropDestinationType: {
-    type: String,
-    trim: true
-  },
-  dropLocationName: {
-    type: String,
-    trim: true
-  },
-  dropCity: {
-    type: String,
-    trim: true
-  },
-  dropState: {
-    type: String,
-    trim: true
-  },
-  dropZip: {
-    type: String,
-    trim: true
-  },
-  dropContactName: {
-    type: String,
-    trim: true
-  },
-  dropContactPhone: {
-    type: String,
-    trim: true
-  },
-  // Drop Date and Time Range
-  dropDateStart: {
-    type: Date
-  },
-  dropDateEnd: {
-    type: Date
-  },
-  dropTimeStart: {
-    type: String,
-    trim: true
-  },
-  dropTimeEnd: {
-    type: String,
-    trim: true
-  },
-
   // Documents and Images (any type of file)
   documents: [{
     url: {
@@ -166,6 +77,43 @@ const vehicleSchema = new mongoose.Schema({
     }
   }],
 
+  // Transport History - Track all transport jobs for this vehicle
+  transportJobs: [{
+    transportJobId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TransportJob'
+    },
+    routeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Route'
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'in_progress', 'completed', 'cancelled']
+    },
+    transportPurpose: {
+      type: String,
+      enum: ['initial_delivery', 'relocation', 'dealer_transfer', 'auction', 'service', 'redistribution']
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+
+  // Transport Statistics
+  totalTransports: {
+    type: Number,
+    default: 0
+  },
+  lastTransportDate: {
+    type: Date
+  },
+  isAvailableForTransport: {
+    type: Boolean,
+    default: true
+  },
+
   // Status
   status: {
     type: String,
@@ -173,13 +121,13 @@ const vehicleSchema = new mongoose.Schema({
     default: VEHICLE_STATUS.PURCHASED_INTAKE_NEEDED
   },
 
-  // Delivery tracking
+  // Delivery tracking (deprecated - kept for backward compatibility)
   deliveredAt: {
     type: Date
   },
 
-  // Transport Job Reference
-  transportJobId: {
+  // Current Transport Job Reference (active transport job)
+  currentTransportJobId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'TransportJob'
   },

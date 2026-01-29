@@ -26,19 +26,26 @@ exports.createFuelExpense = async (req, res) => {
         longitude: parseFloat(backgroundLocation.longitude),
         accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
       } : undefined,
-      askedLocation: askedLocation ? {
-        latitude: parseFloat(askedLocation.latitude),
-        longitude: parseFloat(askedLocation.longitude),
-        accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
-        // Save text fields for the location the user typed/selected
-        formattedAddress: askedLocation.formattedAddress || undefined,
-        name: askedLocation.name || undefined,
-        address: askedLocation.address || undefined,
-        city: askedLocation.city || undefined,
-        state: askedLocation.state || undefined,
-        zipCode: askedLocation.zipCode || undefined,
-        placeId: askedLocation.placeId || undefined
-      } : undefined,
+      askedLocation: askedLocation ? (() => {
+        const locationService = require('../utils/locationService');
+        const loc = {
+          latitude: parseFloat(askedLocation.latitude),
+          longitude: parseFloat(askedLocation.longitude),
+          accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
+          // Save text fields for the location the user typed/selected
+          formattedAddress: askedLocation.formattedAddress,
+          name: askedLocation.name,
+          address: askedLocation.address,
+          city: askedLocation.city,
+          state: askedLocation.state,
+          zipCode: askedLocation.zipCode,
+          zip: askedLocation.zipCode || askedLocation.zip, // Support both zipCode and zip
+          placeId: askedLocation.placeId
+        };
+        // Populate formattedAddress if not provided
+        locationService.populateFormattedAddress(loc);
+        return loc;
+      })() : undefined,
       routeId,
       driverId,
       truckId: expenseData.truckId,
@@ -108,19 +115,26 @@ exports.createMaintenanceExpense = async (req, res) => {
         longitude: parseFloat(backgroundLocation.longitude),
         accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
       } : undefined,
-      askedLocation: askedLocation ? {
-        latitude: parseFloat(askedLocation.latitude),
-        longitude: parseFloat(askedLocation.longitude),
-        accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
-        // Save text fields for the location the user typed/selected
-        formattedAddress: askedLocation.formattedAddress || undefined,
-        name: askedLocation.name || undefined,
-        address: askedLocation.address || undefined,
-        city: askedLocation.city || undefined,
-        state: askedLocation.state || undefined,
-        zipCode: askedLocation.zipCode || undefined,
-        placeId: askedLocation.placeId || undefined
-      } : undefined,
+      askedLocation: askedLocation ? (() => {
+        const locationService = require('../utils/locationService');
+        const loc = {
+          latitude: parseFloat(askedLocation.latitude),
+          longitude: parseFloat(askedLocation.longitude),
+          accuracy: askedLocation.accuracy ? parseFloat(askedLocation.accuracy) : undefined,
+          // Save text fields for the location the user typed/selected
+          formattedAddress: askedLocation.formattedAddress,
+          name: askedLocation.name,
+          address: askedLocation.address,
+          city: askedLocation.city,
+          state: askedLocation.state,
+          zipCode: askedLocation.zipCode,
+          zip: askedLocation.zipCode || askedLocation.zip, // Support both zipCode and zip
+          placeId: askedLocation.placeId
+        };
+        // Populate formattedAddress if not provided
+        locationService.populateFormattedAddress(loc);
+        return loc;
+      })() : undefined,
       routeId,
       driverId,
       truckId: expenseData.truckId,

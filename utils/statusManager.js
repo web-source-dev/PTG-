@@ -117,33 +117,106 @@ const updateVehicleOnCreate = async (vehicleId) => {
 /**
  * Update vehicle and transport job status when transport job is created
  */
+/**
+ * Calculate vehicle status based on all its transport jobs
+ * Status priority (highest to lowest):
+ * 1. "In Transport" - if any job is in transit
+ * 2. "Ready for Transport" - if any job needs dispatch or is dispatched
+ * 3. "Delivered" - if all jobs are delivered
+ * 4. "Cancelled" - if all jobs are cancelled
+ * 5. "Intake Completed" - if no active jobs
+ */
+const calculateVehicleStatusFromJobs = async (vehicleId) => {
+  try {
+    // Get all transport jobs for this vehicle
+    const transportJobs = await TransportJob.find({ vehicleId }).select('status');
+
+    if (transportJobs.length === 0) {
+      return VEHICLE_STATUS.INTAKE_COMPLETED;
+    }
+
+    // Check status priority
+    const hasInTransit = transportJobs.some(job => job.status === TRANSPORT_JOB_STATUS.IN_TRANSIT);
+    if (hasInTransit) {
+      return VEHICLE_STATUS.IN_TRANSPORT;
+    }
+
+    const hasReadyOrDispatched = transportJobs.some(job =>
+      job.status === TRANSPORT_JOB_STATUS.NEEDS_DISPATCH ||
+      job.status === TRANSPORT_JOB_STATUS.DISPATCHED
+    );
+    if (hasReadyOrDispatched) {
+      return VEHICLE_STATUS.READY_FOR_TRANSPORT;
+    }
+
+    const hasActiveJobs = transportJobs.some(job =>
+      job.status !== TRANSPORT_JOB_STATUS.DELIVERED &&
+      job.status !== TRANSPORT_JOB_STATUS.CANCELLED
+    );
+    if (!hasActiveJobs) {
+      // All jobs are either delivered or cancelled
+      const allDelivered = transportJobs.every(job => job.status === TRANSPORT_JOB_STATUS.DELIVERED);
+      const allCancelled = transportJobs.every(job => job.status === TRANSPORT_JOB_STATUS.CANCELLED);
+
+      if (allDelivered) {
+        return VEHICLE_STATUS.DELIVERED;
+      } else if (allCancelled) {
+        return VEHICLE_STATUS.CANCELLED;
+      } else {
+        // Mixed delivered/cancelled - keep as delivered for now
+        return VEHICLE_STATUS.DELIVERED;
+      }
+    }
+
+    // Default fallback
+    return VEHICLE_STATUS.READY_FOR_TRANSPORT;
+  } catch (error) {
+    console.error('Error calculating vehicle status from jobs:', error);
+    return VEHICLE_STATUS.INTAKE_COMPLETED;
+  }
+};
+
 const updateStatusOnTransportJobCreate = async (transportJobId, vehicleId) => {
   try {
-    // Get the transport job to check if it's posted to Central Dispatch
-    const transportJob = await TransportJob.findById(transportJobId);
-    
-    // Determine status based on whether it's posted to Central Dispatch
-    const jobStatus = transportJob?.centralDispatchPosted 
-      ? TRANSPORT_JOB_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
-      : TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
-    
-    const vehicleStatus = transportJob?.centralDispatchPosted
-      ? VEHICLE_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
-      : VEHICLE_STATUS.READY_FOR_TRANSPORT;
+    // Set default status for transport job
+    const jobStatus = TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
 
     // Update transport job status
     await TransportJob.findByIdAndUpdate(transportJobId, {
       status: jobStatus
     });
 
-    // Update vehicle status
+    // Update vehicle status based on all its transport jobs
     if (vehicleId) {
+      const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
       await Vehicle.findByIdAndUpdate(vehicleId, {
-        status: vehicleStatus
+        status: newVehicleStatus,
+        currentTransportJobId: transportJobId // Set this as the current active job
       });
     }
   } catch (error) {
     console.error('Error updating status on transport job create:', error);
+  }
+};
+
+/**
+ * Update vehicle status when a transport job status changes
+ */
+const updateStatusOnTransportJobStatusChange = async (transportJobId) => {
+  try {
+    // Get the transport job to find the vehicle
+    const transportJob = await TransportJob.findById(transportJobId).select('vehicleId');
+    if (!transportJob || !transportJob.vehicleId) {
+      return;
+    }
+
+    // Calculate and update vehicle status
+    const newVehicleStatus = await calculateVehicleStatusFromJobs(transportJob.vehicleId);
+    await Vehicle.findByIdAndUpdate(transportJob.vehicleId, {
+      status: newVehicleStatus
+    });
+  } catch (error) {
+    console.error('Error updating status on transport job status change:', error);
   }
 };
 
@@ -284,18 +357,25 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
         : false;
 
       if (allStopsCompleted) {
-        // All stops completed - mark transport jobs and vehicles as delivered
+        // All stops completed - mark transport jobs as delivered and recalculate vehicle statuses
         for (const jobId of transportJobIds) {
           await TransportJob.findByIdAndUpdate(jobId, {
             status: TRANSPORT_JOB_STATUS.DELIVERED
           });
 
+          // Get the transport job to find the vehicle
           const job = await TransportJob.findById(jobId).populate('vehicleId');
           if (job && job.vehicleId) {
-            await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-              status: VEHICLE_STATUS.DELIVERED,
-              deliveredAt: new Date()
-            });
+            // Recalculate vehicle status based on all transport jobs
+            const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
+            const updateData = { status: newVehicleStatus };
+
+            // Add deliveredAt timestamp if vehicle is now fully delivered
+            if (newVehicleStatus === VEHICLE_STATUS.DELIVERED) {
+              updateData.deliveredAt = new Date();
+            }
+
+            await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, updateData);
           }
         }
       }
@@ -318,27 +398,20 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
         });
       }
     } else if (newStatus === ROUTE_STATUS.CANCELLED) {
-      // Route cancelled - revert transport jobs and vehicles
+      // Route cancelled - reset transport jobs and recalculate vehicle statuses
       for (const jobId of transportJobIds) {
-        // Get transport job to check if it's posted to Central Dispatch
-        const job = await TransportJob.findById(jobId).populate('vehicleId');
-        
-        // Determine status based on whether it's posted to Central Dispatch
-        const jobStatus = job?.centralDispatchPosted
-          ? TRANSPORT_JOB_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
-          : TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
-        
-        const vehicleStatus = job?.centralDispatchPosted
-          ? VEHICLE_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
-          : VEHICLE_STATUS.READY_FOR_TRANSPORT;
-
         await TransportJob.findByIdAndUpdate(jobId, {
-          status: jobStatus
+          status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH,
+          $unset: { assignedDriver: 1 }
         });
 
+        // Get the transport job to find the vehicle
+        const job = await TransportJob.findById(jobId).populate('vehicleId');
         if (job && job.vehicleId) {
+          // Recalculate vehicle status based on all transport jobs
+          const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
           await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: vehicleStatus
+            status: newVehicleStatus
           });
         }
       }
@@ -369,10 +442,10 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
     // Use updated stops if provided, otherwise use route.stops
     const stopsToCheck = updatedStops || route.stops;
 
-    // If stop is completed and it's a drop stop, update transport job and vehicle
+    // If stop is completed and it's a drop stop, update transport job and recalculate vehicle status
     if (newStopStatus === ROUTE_STOP_STATUS.COMPLETED && stopType === 'drop' && transportJobId) {
-      const jobId = typeof transportJobId === 'object' 
-        ? (transportJobId._id || transportJobId.id) 
+      const jobId = typeof transportJobId === 'object'
+        ? (transportJobId._id || transportJobId.id)
         : transportJobId;
 
       // Check if all drop stops for this transport job are completed
@@ -384,25 +457,32 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
       }).every(stop => stop.status === ROUTE_STOP_STATUS.COMPLETED);
 
       if (allDropStopsCompleted) {
-        // All drop stops completed - mark transport job and vehicle as delivered
+        // All drop stops completed - mark transport job as delivered
         await TransportJob.findByIdAndUpdate(jobId, {
           status: TRANSPORT_JOB_STATUS.DELIVERED
         });
 
+        // Get the transport job to find the vehicle
         const job = await TransportJob.findById(jobId).populate('vehicleId');
         if (job && job.vehicleId) {
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: VEHICLE_STATUS.DELIVERED,
-            deliveredAt: new Date()
-          });
+          // Recalculate vehicle status based on all transport jobs
+          const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
+          const updateData = { status: newVehicleStatus };
+
+          // Add deliveredAt timestamp if vehicle is now fully delivered
+          if (newVehicleStatus === VEHICLE_STATUS.DELIVERED) {
+            updateData.deliveredAt = new Date();
+          }
+
+          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, updateData);
         }
       }
     }
 
-    // If stop is completed and it's a pickup stop, update transport job to "In Transit" and vehicle to "In Transport"
+    // If stop is completed and it's a pickup stop, update transport job to "In Transit" and recalculate vehicle status
     if (newStopStatus === ROUTE_STOP_STATUS.COMPLETED && stopType === 'pickup' && transportJobId) {
-      const jobId = typeof transportJobId === 'object' 
-        ? (transportJobId._id || transportJobId.id) 
+      const jobId = typeof transportJobId === 'object'
+        ? (transportJobId._id || transportJobId.id)
         : transportJobId;
 
       // Update transport job status to "In Transit"
@@ -410,15 +490,14 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
         status: TRANSPORT_JOB_STATUS.IN_TRANSIT
       });
 
+      // Get the transport job to find the vehicle
       const job = await TransportJob.findById(jobId).populate('vehicleId');
       if (job && job.vehicleId) {
-        // Only update if not already delivered
-        const vehicle = await Vehicle.findById(job.vehicleId._id || job.vehicleId);
-        if (vehicle && vehicle.status !== VEHICLE_STATUS.DELIVERED) {
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: VEHICLE_STATUS.IN_TRANSPORT
-          });
-        }
+        // Recalculate vehicle status based on all transport jobs
+        const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
+        await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
+          status: newVehicleStatus
+        });
       }
     }
 
@@ -474,12 +553,19 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
             status: TRANSPORT_JOB_STATUS.DELIVERED
           });
 
+          // Get the transport job to find the vehicle
           const job = await TransportJob.findById(jobId).populate('vehicleId');
           if (job && job.vehicleId) {
-            await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-              status: VEHICLE_STATUS.DELIVERED,
-              deliveredAt: new Date()
-            });
+            // Recalculate vehicle status based on all transport jobs
+            const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
+            const updateData = { status: newVehicleStatus };
+
+            // Add deliveredAt timestamp if vehicle is now fully delivered
+            if (newVehicleStatus === VEHICLE_STATUS.DELIVERED) {
+              updateData.deliveredAt = new Date();
+            }
+
+            await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, updateData);
           }
         }
 
@@ -503,28 +589,25 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
  */
 const updateStatusOnTransportJobRemoved = async (transportJobId) => {
   try {
-    // Get transport job to check if it's posted to Central Dispatch
-    const job = await TransportJob.findById(transportJobId).populate('vehicleId');
-    
-    // Determine status based on whether it's posted to Central Dispatch
-    const jobStatus = job?.centralDispatchPosted
-      ? TRANSPORT_JOB_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
-      : TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
-    
-    const vehicleStatus = job?.centralDispatchPosted
-      ? VEHICLE_STATUS.PUBLISHED_TO_CENTRAL_DISPATCH
-      : VEHICLE_STATUS.READY_FOR_TRANSPORT;
+    // Get the transport job first to find the vehicle
+    const job = await TransportJob.findById(transportJobId).select('vehicleId status');
 
-    // Update transport job status
+    if (!job) {
+      console.error('Transport job not found for removal:', transportJobId);
+      return;
+    }
+
+    // Reset transport job status to needs dispatch and remove route reference
     await TransportJob.findByIdAndUpdate(transportJobId, {
-      status: jobStatus,
-      $unset: { routeId: 1 }
+      status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH,
+      $unset: { routeId: 1, assignedDriver: 1 }
     });
 
-    // Update vehicle status
-    if (job && job.vehicleId) {
-      await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-        status: vehicleStatus
+    // Update vehicle status based on all its remaining transport jobs
+    if (job.vehicleId) {
+      const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId);
+      await Vehicle.findByIdAndUpdate(job.vehicleId, {
+        status: newVehicleStatus
       });
     }
   } catch (error) {
@@ -668,14 +751,236 @@ const updateAllRelatedEntities = async (routeId) => {
   }
 };
 
+/**
+ * Helper function to safely create Date objects from date and time strings
+ */
+const createSafeDate = (dateStr, timeStr) => {
+  if (!dateStr && !timeStr) return undefined;
+
+  try {
+    // If we have a date string, use it; otherwise use today's date
+    const datePart = dateStr || new Date().toISOString().split('T')[0];
+    const timePart = timeStr || '00:00';
+
+    // Validate the time format (HH:MM)
+    if (timeStr && !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(timeStr)) {
+      console.warn(`Invalid time format: ${timeStr}, skipping date creation`);
+      return undefined;
+    }
+
+    const dateTimeStr = `${datePart}T${timePart}`;
+    const date = new Date(dateTimeStr);
+
+    // Check if the created date is valid
+    if (isNaN(date.getTime())) {
+      console.warn(`Invalid date created from ${dateTimeStr}, skipping`);
+      return undefined;
+    }
+
+    return date;
+  } catch (error) {
+    console.warn(`Error creating date from date: ${dateStr}, time: ${timeStr}:`, error);
+    return undefined;
+  }
+};
+
+/**
+ * Sync transport job updates to route stops
+ * When a transport job is updated, find all routes that have stops referencing this job
+ * and update the corresponding route stops with the new transport job information
+ */
+const syncTransportJobToRouteStops = async (transportJobId) => {
+  try {
+    console.log(`🔄 Starting sync from transport job ${transportJobId} to route stops`);
+
+    // Get the updated transport job
+    const transportJob = await TransportJob.findById(transportJobId);
+    if (!transportJob) {
+      console.warn(`⚠️ Transport job ${transportJobId} not found, skipping sync`);
+      return;
+    }
+
+    // Find all routes that have stops referencing this transport job
+    const routes = await Route.find({
+      'stops.transportJobId': transportJobId
+    });
+
+    console.log(`📋 Found ${routes.length} routes with stops referencing transport job ${transportJobId}`);
+
+    for (const route of routes) {
+      let routeUpdated = false;
+
+      // Update stops that reference this transport job
+      const updatedStops = route.stops.map(stop => {
+        if (stop.transportJobId && stop.transportJobId.toString() === transportJobId.toString()) {
+          console.log(`🔄 Updating stop ${stop._id} in route ${route._id} with new transport job data`);
+
+          // Update stop information based on transport job data
+          // For pickup stops, sync pickup location and schedule
+          if (stop.stopType === 'pickup') {
+            return {
+              ...stop,
+              scheduledDate: transportJob.pickupDateStart || transportJob.pickupDateEnd || stop.scheduledDate,
+              scheduledTimeStart: createSafeDate(transportJob.pickupDateStart, transportJob.pickupTimeStart) || stop.scheduledTimeStart,
+              scheduledTimeEnd: createSafeDate(transportJob.pickupDateEnd, transportJob.pickupTimeEnd) || stop.scheduledTimeEnd,
+              location: {
+                ...stop.location,
+                name: transportJob.pickupLocationName || stop.location?.name,
+                city: transportJob.pickupCity || stop.location?.city,
+                state: transportJob.pickupState || stop.location?.state,
+                zip: transportJob.pickupZip || stop.location?.zip
+              }
+            };
+          }
+
+          // For drop stops, sync drop location and schedule
+          if (stop.stopType === 'drop') {
+            return {
+              ...stop,
+              scheduledDate: transportJob.dropDateStart || transportJob.dropDateEnd || stop.scheduledDate,
+              scheduledTimeStart: createSafeDate(transportJob.dropDateStart, transportJob.dropTimeStart) || stop.scheduledTimeStart,
+              scheduledTimeEnd: createSafeDate(transportJob.dropDateEnd, transportJob.dropTimeEnd) || stop.scheduledTimeEnd,
+              location: {
+                ...stop.location,
+                name: transportJob.dropLocationName || stop.location?.name,
+                city: transportJob.dropCity || stop.location?.city,
+                state: transportJob.dropState || stop.location?.state,
+                zip: transportJob.dropZip || stop.location?.zip
+              }
+            };
+          }
+        }
+        return stop;
+      });
+
+      // If any stops were updated, save the route
+      if (JSON.stringify(route.stops) !== JSON.stringify(updatedStops)) {
+        route.stops = updatedStops;
+        await route.save();
+        routeUpdated = true;
+        console.log(`✅ Updated route ${route._id} with new transport job data`);
+      }
+    }
+
+    console.log(`✅ Completed sync from transport job ${transportJobId} to route stops`);
+  } catch (error) {
+    console.error(`❌ Error syncing transport job ${transportJobId} to route stops:`, error);
+    throw error;
+  }
+};
+
+/**
+ * Sync route stop updates to transport job
+ * When a route stop is updated, update the corresponding transport job with the new stop information
+ */
+const syncRouteStopToTransportJob = async (routeId, stopId) => {
+  try {
+    console.log(`🔄 Starting sync from route stop ${stopId} in route ${routeId} to transport job`);
+
+    // Get the route with the updated stop
+    const route = await Route.findById(routeId);
+    if (!route || !route.stops) {
+      console.warn(`⚠️ Route ${routeId} or stops not found, skipping sync`);
+      return;
+    }
+
+    // Find the specific stop
+    let stop = route.stops.find(s => s._id && s._id.toString() === stopId.toString());
+    if (!stop) {
+      console.warn(`⚠️ Stop ${stopId} not found in route ${routeId}, searching by string comparison`);
+      // Try alternative search methods
+      stop = route.stops.find(s => s._id && s._id.toString() === stopId);
+      if (stop) {
+        console.log(`✅ Found stop by string comparison`);
+      } else {
+        console.warn(`❌ Stop ${stopId} not found in route ${routeId}, skipping sync`);
+        return;
+      }
+    }
+
+    // Only sync if this is a pickup or drop stop with a transport job reference
+    if ((stop.stopType !== 'pickup' && stop.stopType !== 'drop') || !stop.transportJobId) {
+      console.log(`ℹ️ Stop ${stopId} is not a pickup/drop stop or has no transport job reference, skipping sync`);
+      return;
+    }
+
+    console.log(`📋 Processing ${stop.stopType} stop ${stopId} for transport job ${stop.transportJobId}`);
+
+    // Get the transport job
+    const transportJob = await TransportJob.findById(stop.transportJobId);
+    if (!transportJob) {
+      console.warn(`⚠️ Transport job ${stop.transportJobId} not found, skipping sync`);
+      return;
+    }
+
+    let jobUpdated = false;
+    const updateData = {};
+
+    // Sync stop information to transport job based on stop type
+    if (stop.stopType === 'pickup') {
+      // Update pickup information from the stop
+      if (stop.scheduledDate) {
+        updateData.pickupDateStart = stop.scheduledDate;
+        updateData.pickupDateEnd = stop.scheduledDate;
+      }
+      if (stop.scheduledTimeStart) {
+        updateData.pickupTimeStart = stop.scheduledTimeStart.toTimeString().slice(0, 5); // HH:MM format
+      }
+      if (stop.scheduledTimeEnd) {
+        updateData.pickupTimeEnd = stop.scheduledTimeEnd.toTimeString().slice(0, 5); // HH:MM format
+      }
+      if (stop.location) {
+        updateData.pickupLocationName = stop.location.name;
+        updateData.pickupCity = stop.location.city;
+        updateData.pickupState = stop.location.state;
+        updateData.pickupZip = stop.location.zip;
+      }
+    } else if (stop.stopType === 'drop') {
+      // Update drop information from the stop
+      if (stop.scheduledDate) {
+        updateData.dropDateStart = stop.scheduledDate;
+        updateData.dropDateEnd = stop.scheduledDate;
+      }
+      if (stop.scheduledTimeStart) {
+        updateData.dropTimeStart = stop.scheduledTimeStart.toTimeString().slice(0, 5); // HH:MM format
+      }
+      if (stop.scheduledTimeEnd) {
+        updateData.dropTimeEnd = stop.scheduledTimeEnd.toTimeString().slice(0, 5); // HH:MM format
+      }
+      if (stop.location) {
+        updateData.dropLocationName = stop.location.name;
+        updateData.dropCity = stop.location.city;
+        updateData.dropState = stop.location.state;
+        updateData.dropZip = stop.location.zip;
+      }
+    }
+
+    // If any data was updated, save the transport job
+    if (Object.keys(updateData).length > 0) {
+      await TransportJob.findByIdAndUpdate(transportJob._id, updateData);
+      jobUpdated = true;
+      console.log(`✅ Updated transport job ${transportJob._id} with new stop data:`, updateData);
+    }
+
+    console.log(`✅ Completed sync from route stop ${stopId} to transport job ${transportJob._id}`);
+  } catch (error) {
+    console.error(`❌ Error syncing route stop ${stopId} to transport job:`, error);
+    throw error;
+  }
+};
+
 module.exports = {
+  calculateVehicleStatusFromJobs,
   updateDriverStats,
   updateAllRelatedEntities,
   updateVehicleOnCreate,
   updateStatusOnTransportJobCreate,
+  updateStatusOnTransportJobStatusChange,
   updateStatusOnRouteCreate,
   updateStatusOnStopsSetup,
   updateStatusOnRouteStatusChange,
   updateStatusOnStopUpdate,
-  updateStatusOnTransportJobRemoved
+  updateStatusOnTransportJobRemoved,
+  syncTransportJobToRouteStops,
+  syncRouteStopToTransportJob
 };

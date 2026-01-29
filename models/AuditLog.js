@@ -16,7 +16,7 @@ const auditLogSchema = new mongoose.Schema({
       // Transport job actions
       'create_transport_job', 'update_transport_job', 'delete_transport_job',
       // Vehicle actions
-      'create_vehicle', 'update_vehicle', 'delete_vehicle',
+      'create_vehicle', 'update_vehicle', 'delete_vehicle', 'import_vehicle',
       // Vehicle Profit Calculation actions
       'create_vehicle_profit_calculation', 'update_vehicle_profit_calculation', 'delete_vehicle_profit_calculation',
       // Calendar actions
@@ -54,7 +54,8 @@ const auditLogSchema = new mongoose.Schema({
   location: {
     latitude: Number,
     longitude: Number,
-    accuracy: Number
+    accuracy: Number,
+    formattedAddress: String // Complete formatted address: "Address, City, State ZIP"
   },
 
   details: {
@@ -79,5 +80,14 @@ auditLogSchema.index({ driverId: 1, createdAt: -1 });
 auditLogSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 auditLogSchema.index({ routeId: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1, createdAt: -1 });
+
+// Pre-save middleware to populate formattedAddress for location
+auditLogSchema.pre('save', function(next) {
+  if (this.location && (this.location.address || this.location.city || this.location.state)) {
+    const locationService = require('../utils/locationService');
+    locationService.populateFormattedAddress(this.location);
+  }
+  next();
+});
 
 module.exports = mongoose.model('AuditLog', auditLogSchema);

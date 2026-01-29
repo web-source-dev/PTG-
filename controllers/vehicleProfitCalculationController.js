@@ -13,7 +13,7 @@ const getAllVehicleProfitCalculations = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const calculations = await VehicleProfitCalculation.find()
-      .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip deliveryPriority')
+      .populate('vehicleId', 'vin year make model deliveryPriority')
       .populate('createdBy', 'firstName lastName email')
       .populate('lastUpdatedBy', 'firstName lastName email')
       .sort({ createdAt: -1 })
@@ -49,7 +49,7 @@ const getVehicleProfitCalculationByVehicleId = async (req, res) => {
     const { vehicleId } = req.params;
 
     let calculation = await VehicleProfitCalculation.findOne({ vehicleId })
-      .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip deliveryPriority')
+      .populate('vehicleId', 'vin year make model deliveryPriority')
       .populate('createdBy', 'firstName lastName email')
       .populate('lastUpdatedBy', 'firstName lastName email');
 
@@ -70,7 +70,7 @@ const getVehicleProfitCalculationByVehicleId = async (req, res) => {
       });
 
       await calculation.populate([
-        { path: 'vehicleId', select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip deliveryPriority' },
+        { path: 'vehicleId', select: 'vin year make model deliveryPriority' },
         { path: 'createdBy', select: 'firstName lastName email' },
         { path: 'lastUpdatedBy', select: 'firstName lastName email' }
       ]);
@@ -110,7 +110,7 @@ const createOrUpdateVehicleProfitCalculation = async (req, res) => {
         await calculation.save();
 
         await calculation.populate([
-          { path: 'vehicleId', select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip deliveryPriority' },
+          { path: 'vehicleId', select: 'vin year make model deliveryPriority' },
           { path: 'createdBy', select: 'firstName lastName email' },
           { path: 'lastUpdatedBy', select: 'firstName lastName email' }
         ]);
@@ -139,7 +139,7 @@ const createOrUpdateVehicleProfitCalculation = async (req, res) => {
         });
 
         await calculation.populate([
-          { path: 'vehicleId', select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip deliveryPriority' },
+          { path: 'vehicleId', select: 'vin year make model deliveryPriority' },
           { path: 'createdBy', select: 'firstName lastName email' },
           { path: 'lastUpdatedBy', select: 'firstName lastName email' }
         ]);
@@ -191,7 +191,7 @@ const updateVehicleProfitCalculation = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     )
-      .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip deliveryPriority')
+      .populate('vehicleId', 'vin year make model deliveryPriority')
       .populate('createdBy', 'firstName lastName email')
       .populate('lastUpdatedBy', 'firstName lastName email');
 

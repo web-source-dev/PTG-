@@ -51,7 +51,7 @@ exports.createVehicle = async (req, res) => {
     const updatedVehicle = await Vehicle.findById(vehicle._id);
 
     // Note: Transport job is NOT created automatically
-    // PTG team will create transport job when they decide on carrier (PTG or Central Dispatch)
+    // PTG team will create transport job
 
     res.status(201).json({
       success: true,
@@ -113,7 +113,7 @@ exports.getAllVehicles = async (req, res) => {
     const vehicles = await Vehicle.find(query)
       .sort({ createdAt: -1 })
       .populate('createdBy', 'firstName lastName email')
-      .populate('transportJobId')
+      .populate('currentTransportJobId')
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
 
@@ -149,7 +149,7 @@ exports.getVehicleById = async (req, res) => {
     const vehicle = await Vehicle.findById(req.params.id)
       .populate('createdBy', 'firstName lastName email')
       .populate({
-        path: 'transportJobId',
+        path: 'currentTransportJobId',
         populate: {
           path: 'routeId',
           select: 'routeNumber status driverId truckId'
@@ -165,9 +165,9 @@ exports.getVehicleById = async (req, res) => {
 
     // If vehicle has a transport job, include the photos and checklists from it
     let transportJobData = null;
-    if (vehicle.transportJobId) {
+    if (vehicle.currentTransportJobId) {
       const TransportJob = require('../models/TransportJob');
-      const transportJob = await TransportJob.findById(vehicle.transportJobId._id)
+      const transportJob = await TransportJob.findById(vehicle.currentTransportJobId._id)
         .select('pickupPhotos deliveryPhotos pickupChecklist deliveryChecklist status');
 
       if (transportJob) {
@@ -223,7 +223,7 @@ exports.getVehicleByVin = async (req, res) => {
 
     const vehicle = await Vehicle.findOne({ vin: vin.toUpperCase() })
       .populate('createdBy', 'firstName lastName email')
-      .populate('transportJobId');
+      .populate('currentTransportJobId');
 
     res.status(200).json({
       success: true,
@@ -261,7 +261,7 @@ exports.updateVehicle = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     ).populate('createdBy', 'firstName lastName email')
-     .populate('transportJobId');
+     .populate('currentTransportJobId');
 
     // Log vehicle update (only if user ID is valid ObjectId)
     const isValidObjectId = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id);
@@ -297,6 +297,100 @@ exports.updateVehicle = async (req, res) => {
 };
 
 /**
+ * Import vehicle from VOS Central Dispatch transport
+ */
+exports.importFromVOS = async (req, res) => {
+  try {
+    const vosTransportData = req.body;
+
+    // Validate required fields
+    if (!vosTransportData.vin || !vosTransportData.year || !vosTransportData.make || !vosTransportData.model) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required vehicle information (VIN, year, make, model)'
+      });
+    }
+
+    // Check if vehicle with this VIN already exists
+    const existingVehicle = await Vehicle.findOne({ vin: vosTransportData.vin.toUpperCase() });
+    if (existingVehicle) {
+      return res.status(409).json({
+        success: false,
+        error: `Vehicle with VIN ${vosTransportData.vin} already exists in PTG system`
+      });
+    }
+
+    // Map VOS transport data to PTG vehicle data
+    const vehicleData = {
+      vin: vosTransportData.vin,
+      year: vosTransportData.year,
+      make: vosTransportData.make,
+      model: vosTransportData.model,
+
+      // Purchase details
+      purchaseSource: vosTransportData.purchaseSource || 'Central Dispatch Import',
+      purchaseDate: vosTransportData.purchaseDate ? new Date(vosTransportData.purchaseDate) : new Date(),
+      purchasePrice: vosTransportData.purchasePrice || 0,
+      buyerName: vosTransportData.buyerName || 'Central Dispatch',
+
+      // Documents (copy from VOS if available)
+      documents: vosTransportData.documents || [],
+
+      // Priority and notes
+      deliveryPriority: vosTransportData.deliveryPriority || 'Normal',
+      notes: vosTransportData.notes || `Imported from VOS Central Dispatch Transport - ${vosTransportData._id}. Location data moved to transport job.`,
+
+      // Metadata
+      source: 'VOS_IMPORT',
+      externalUserId: vosTransportData.createdBy?._id || vosTransportData.createdBy,
+      externalUserEmail: vosTransportData.createdBy?.email,
+
+      // Add metadata - handle import context
+      createdBy: req.user ? req.user._id : null
+    };
+
+    // Create the vehicle
+    const vehicle = await Vehicle.create(vehicleData);
+
+    // Log vehicle import
+    await AuditLog.create({
+      action: 'import_vehicle',
+      entityType: 'vehicle',
+      entityId: vehicle._id,
+      userId: req.user?._id,
+      driverId: undefined,
+      details: {
+        vin: vehicleData.vin,
+        year: vehicleData.year,
+        make: vehicleData.make,
+        model: vehicleData.model,
+        source: 'VOS_CENTRAL_DISPATCH',
+        vosTransportId: vosTransportData._id
+      },
+      notes: `Imported vehicle ${vehicleData.vin} from VOS Central Dispatch`
+    });
+
+    // Update vehicle status to "Intake Completed" when vehicle is imported
+    await updateVehicleOnCreate(vehicle._id);
+
+    // Reload vehicle to get updated status
+    const updatedVehicle = await Vehicle.findById(vehicle._id);
+
+    res.status(201).json({
+      success: true,
+      data: updatedVehicle,
+      message: 'Vehicle successfully imported from Central Dispatch'
+    });
+  } catch (error) {
+    console.error('Error importing vehicle from VOS:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to import vehicle from Central Dispatch'
+    });
+  }
+};
+
+/**
  * Delete vehicle
  */
 exports.deleteVehicle = async (req, res) => {
@@ -325,14 +419,14 @@ exports.deleteVehicle = async (req, res) => {
         year: vehicle.year,
         make: vehicle.make,
         model: vehicle.model,
-        transportJobId: vehicle.transportJobId
+        currentTransportJobId: vehicle.currentTransportJobId
       },
       notes: `Deleted vehicle ${vehicle.vin} (${vehicle.year} ${vehicle.make} ${vehicle.model})`
     });
 
     // If there's a transport job, delete it too
-    if (vehicle.transportJobId) {
-      await TransportJob.findByIdAndDelete(vehicle.transportJobId);
+    if (vehicle.currentTransportJobId) {
+      await TransportJob.findByIdAndDelete(vehicle.currentTransportJobId);
     }
 
     // Delete the vehicle
