@@ -133,9 +133,24 @@ const transportJobSchema = new mongoose.Schema({
 
 
   // Route Reference (for PTG routes)
+  // DEPRECATED: Use pickupRouteId and dropRouteId instead
+  // Kept for backward compatibility
   routeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Route'
+  },
+
+  // Multi-Route Support: Track which routes contain pickup and drop stops
+  // A transport job can span multiple routes (pickup on Route 1, drop on Route 2)
+  pickupRouteId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Route',
+    default: null
+  },
+  dropRouteId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Route',
+    default: null
   },
 
   // Driver Assignment (for tracking which driver moved this load)
@@ -242,7 +257,9 @@ transportJobSchema.index({ jobNumber: 1 });
 transportJobSchema.index({ vehicleId: 1 });
 transportJobSchema.index({ status: 1 });
 transportJobSchema.index({ carrier: 1 });
-transportJobSchema.index({ routeId: 1 });
+transportJobSchema.index({ routeId: 1 }); // Backward compatibility
+transportJobSchema.index({ pickupRouteId: 1 });
+transportJobSchema.index({ dropRouteId: 1 });
 transportJobSchema.index({ createdAt: -1 });
 
 // Pre-save middleware to generate job number and populate formattedAddress fields

@@ -145,6 +145,8 @@ exports.getDriverReport = async (req, res) => {
       _id: { $in: Array.from(transportJobIds) }
     })
       .populate('vehicleId', 'vin year make model')
+      .populate('pickupRouteId', 'routeNumber status')
+      .populate('dropRouteId', 'routeNumber status')
       .sort({ createdAt: -1 });
 
     // Get all expenses by this driver
@@ -286,6 +288,8 @@ exports.getTruckReport = async (req, res) => {
       _id: { $in: Array.from(transportJobIds) }
     })
       .populate('vehicleId', 'vin year make model')
+      .populate('pickupRouteId', 'routeNumber status')
+      .populate('dropRouteId', 'routeNumber status')
       .sort({ createdAt: -1 });
 
     // Get all expenses for this truck
@@ -410,6 +414,8 @@ exports.getRouteReport = async (req, res) => {
       _id: { $in: Array.from(transportJobIds) }
     })
       .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip')
+      .populate('pickupRouteId', 'routeNumber status')
+      .populate('dropRouteId', 'routeNumber status')
       .sort({ createdAt: -1 });
 
     // Get all expenses for this route

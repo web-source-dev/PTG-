@@ -61,6 +61,8 @@ exports.globalSearch = async (req, res) => {
       .select('jobNumber status carrier createdAt')
       .populate('vehicleId', 'vin year make model')
       .populate('routeId', 'routeNumber status')
+      .populate('pickupRouteId', 'routeNumber status')
+      .populate('dropRouteId', 'routeNumber status')
       .limit(searchLimit)
       .sort({ createdAt: -1 }),
 
@@ -159,7 +161,9 @@ exports.globalSearch = async (req, res) => {
           jobNumber: job.jobNumber,
           carrier: job.carrier,
           vehicle: job.vehicleId,
-          route: job.routeId
+          route: job.routeId,
+          pickupRoute: job.pickupRouteId,
+          dropRoute: job.dropRouteId
         },
         url: `/transport-jobs/${job._id}`,
         createdAt: job.createdAt

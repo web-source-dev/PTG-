@@ -150,10 +150,49 @@ exports.getVehicleById = async (req, res) => {
       .populate('createdBy', 'firstName lastName email')
       .populate({
         path: 'currentTransportJobId',
-        populate: {
-          path: 'routeId',
-          select: 'routeNumber status driverId truckId'
-        }
+        populate: [
+          {
+            path: 'routeId',
+            select: 'routeNumber status driverId truckId'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate',
+            populate: [
+              { path: 'driverId', select: 'firstName lastName' },
+              { path: 'truckId', select: 'truckNumber' }
+            ]
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate',
+            populate: [
+              { path: 'driverId', select: 'firstName lastName' },
+              { path: 'truckId', select: 'truckNumber' }
+            ]
+          }
+        ]
+      })
+      .populate({
+        path: 'transportJobs.transportJobId',
+        populate: [
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate',
+            populate: [
+              { path: 'driverId', select: 'firstName lastName' },
+              { path: 'truckId', select: 'truckNumber' }
+            ]
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate',
+            populate: [
+              { path: 'driverId', select: 'firstName lastName' },
+              { path: 'truckId', select: 'truckNumber' }
+            ]
+          }
+        ]
       });
 
     if (!vehicle) {

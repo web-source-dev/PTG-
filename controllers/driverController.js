@@ -7,7 +7,8 @@ const routeTracker = require('../utils/routeTracker');
 const { ROUTE_STATE, TRUCK_STATUS } = require('../constants/status');
 const {
   updateStatusOnRouteStatusChange,
-  updateStatusOnStopUpdate
+  updateStatusOnStopUpdate,
+  updateTransportJobRouteReferences
 } = require('../utils/statusManager');
 
 // Helper function to determine route action from status change
@@ -74,10 +75,20 @@ exports.getMyRoutes = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
@@ -125,10 +136,20 @@ exports.getMyRouteById = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       })
       .populate('createdBy', 'firstName lastName email')
       .populate('lastUpdatedBy', 'firstName lastName email');
@@ -723,8 +744,16 @@ exports.updateMyRoute = async (req, res) => {
       }
     }
 
-    // Handle stop updates after save - update statuses for transport jobs and vehicles
+    // Handle stop updates after save - update transport job route references and statuses
     if (updateData.stops && Array.isArray(updateData.stops)) {
+      // Update transport job route references (pickupRouteId and dropRouteId) when stops change
+      // This handles cases where stops are removed or modified
+      try {
+        await updateTransportJobRouteReferences(routeId, updateData.stops);
+      } catch (routeRefError) {
+        console.error('Failed to update transport job route references:', routeRefError);
+        // Don't fail the route update if route reference updates fail
+      }
       const originalStops = route.stops || [];
       for (let index = 0; index < updateData.stops.length; index++) {
         const updatedStop = updateData.stops[index];
@@ -769,10 +798,20 @@ exports.updateMyRoute = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       });
 
    
@@ -883,10 +922,20 @@ exports.updateMyRouteStop = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       });
 
     res.status(200).json({

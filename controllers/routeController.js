@@ -14,8 +14,18 @@ const {
   updateStatusOnRouteStatusChange,
   updateStatusOnTransportJobRemoved,
   updateStatusOnStopUpdate,
-  syncRouteStopToTransportJob
+  syncRouteStopToTransportJob,
+  updateTransportJobRouteReferences
 } = require('../utils/statusManager');
+
+// Helper function to safely extract job ID from stop transportJobId
+const getJobIdFromStop = (transportJobId) => {
+  if (!transportJobId) return null;
+  if (typeof transportJobId === 'object') {
+    return transportJobId._id || transportJobId.id;
+  }
+  return transportJobId.toString();
+};
 
 /**
  * Create a new route
@@ -144,22 +154,12 @@ exports.createRoute = async (req, res) => {
       notes: `Created route ${route.routeNumber} for driver ${routeData.driverId}`
     });
 
-    // Update transport jobs with route reference based on selectedTransportJobs and stops
-    if (routeData.selectedTransportJobs && Array.isArray(routeData.selectedTransportJobs)) {
-      for (const jobId of routeData.selectedTransportJobs) {
-        await TransportJob.findByIdAndUpdate(jobId, {
-            routeId: route._id
-          });
-        }
-    }
-
-    // Also update based on stops that have transportJobId
     // Sync selectedTransportJobs with transport jobs from stops
     if (routeData.stops && Array.isArray(routeData.stops)) {
       const jobIds = new Set();
       routeData.stops.forEach(stop => {
         if (stop.transportJobId) {
-          jobIds.add(stop.transportJobId.toString());
+          jobIds.add(getJobIdFromStop(stop.transportJobId));
         }
       });
       
@@ -169,12 +169,12 @@ exports.createRoute = async (req, res) => {
         route.selectedTransportJobs = routeData.selectedTransportJobs;
         await route.save();
       }
-      
-      for (const jobId of jobIds) {
-        await TransportJob.findByIdAndUpdate(jobId, {
-          routeId: route._id
-        });
-      }
+    }
+
+    // Update transport job route references (pickupRouteId and dropRouteId)
+    // This enables multi-route transport jobs where pickup can be on Route 1 and drop on Route 2
+    if (routeData.stops && Array.isArray(routeData.stops)) {
+      await updateTransportJobRouteReferences(route._id, routeData.stops);
     }
 
     // Update statuses: route to "Planned" only
@@ -292,11 +292,21 @@ exports.createRoute = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId carrier carrierPayment pickupRouteId dropRouteId',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       });
 
     res.status(201).json({
@@ -415,10 +425,20 @@ exports.getRouteById = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       })
       .populate('createdBy', 'firstName lastName email')
       .populate('lastUpdatedBy', 'firstName lastName email');
@@ -511,7 +531,7 @@ exports.updateRoute = async (req, res) => {
       if (route.stops && Array.isArray(route.stops)) {
         route.stops.forEach(stop => {
           if (stop.transportJobId) {
-            oldJobIds.push(stop.transportJobId.toString());
+            oldJobIds.push(getJobIdFromStop(stop.transportJobId));
           }
         });
       }
@@ -565,7 +585,7 @@ exports.updateRoute = async (req, res) => {
       if (route.stops && Array.isArray(route.stops)) {
         route.stops.forEach(stop => {
           if (stop.transportJobId) {
-            originalJobIds.add(stop.transportJobId.toString());
+            originalJobIds.add(getJobIdFromStop(stop.transportJobId));
           }
         });
       }
@@ -591,7 +611,7 @@ exports.updateRoute = async (req, res) => {
       const jobIds = new Set();
       updateData.stops.forEach(stop => {
         if (stop.transportJobId) {
-          jobIds.add(stop.transportJobId.toString());
+          jobIds.add(getJobIdFromStop(stop.transportJobId));
         }
       });
 
@@ -603,27 +623,33 @@ exports.updateRoute = async (req, res) => {
         updateData.selectedTransportJobs = [];
       }
 
-      for (const jobId of jobIds) {
-        await TransportJob.findByIdAndUpdate(jobId, {
-          routeId: route._id
-        });
-      }
+      // Update transport job route references (pickupRouteId and dropRouteId)
+      // This enables multi-route transport jobs where pickup can be on Route 1 and drop on Route 2
+      await updateTransportJobRouteReferences(route._id, updateData.stops);
 
-      // Check for transport jobs that were removed from the route
-      // These jobs should have their status reverted
-      const removedJobIds = [];
+      // Check for transport jobs that were COMPLETELY removed from the route (no stops at all)
+      // These jobs should have their status reverted to "Needs Dispatch"
+      // Note: Jobs with partial stop removal (e.g., only pickup removed but drop remains) are handled by updateTransportJobRouteReferences
+      // but their status remains unchanged since they still have at least one stop in this route
+      const completelyRemovedJobIds = [];
       for (const originalJobId of originalJobIds) {
-        if (!jobIds.has(originalJobId)) {
-          removedJobIds.push(originalJobId);
+        // A job is completely removed only if it has NO stops at all in the updated route
+        const hasAnyStopInUpdatedRoute = updateData.stops.some(stop => {
+        const stopJobId = getJobIdFromStop(stop.transportJobId);
+          return stopJobId && stopJobId.toString() === originalJobId;
+        });
+
+        if (!hasAnyStopInUpdatedRoute) {
+          completelyRemovedJobIds.push(originalJobId);
         }
       }
 
-      // Update status for removed transport jobs
-      for (const removedJobId of removedJobIds) {
+      // Update status for completely removed transport jobs (no stops at all in this route)
+      for (const removedJobId of completelyRemovedJobIds) {
         try {
           await updateStatusOnTransportJobRemoved(removedJobId);
         } catch (removalError) {
-          console.error('Failed to update status for removed transport job:', removedJobId, removalError);
+          console.error('Failed to update status for completely removed transport job:', removedJobId, removalError);
           // Don't fail the route update if transport job status update fails
         }
       }
@@ -817,12 +843,12 @@ exports.updateRoute = async (req, res) => {
     }
 
     // Check if stops are being added/updated (stops setup) - AFTER route is saved
-    // If stops have transportJobId and route is still "Planned", update transport jobs and vehicles
+    // If stops have transportJobId, update transport jobs and vehicles to "Dispatched"
+    // This should happen whenever transport job stops are added, regardless of route status
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
       const hasTransportJobStops = updateData.stops.some(stop => stop.transportJobId);
-      const isStopsSetup = hasTransportJobStops && (updatedRoute.status === ROUTE_STATUS.PLANNED || !updatedRoute.status);
-      
-      if (isStopsSetup) {
+
+      if (hasTransportJobStops) {
         // This is stops setup - update transport jobs and vehicles to "Dispatched" and "Ready for Transport"
         // Pass the stops array directly to ensure we use the updated data
         try {
@@ -1021,12 +1047,11 @@ exports.updateRoute = async (req, res) => {
         const savedRoute = await updatedRoute.save();
         console.log('✅ Route updated with recalculated distances, saved ID:', savedRoute._id);
 
-        // If this was a stops setup (route is "Planned" and has transport jobs in stops),
-        // ensure transport jobs are updated to "Dispatched" after final save
+        // If route has transport jobs in stops, ensure they are updated to "Dispatched"
+        // This ensures transport job statuses are set correctly after any route updates
         const hasTransportJobStops = savedRoute.stops && savedRoute.stops.some(stop => stop.transportJobId);
-        const isStopsSetup = hasTransportJobStops && (savedRoute.status === ROUTE_STATUS.PLANNED || !savedRoute.status);
-        
-        if (isStopsSetup) {
+
+        if (hasTransportJobStops) {
           try {
             await updateStatusOnStopsSetup(savedRoute._id, savedRoute.stops);
           } catch (stopsSetupError) {
@@ -1059,10 +1084,20 @@ exports.updateRoute = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       });
 
     res.status(200).json({
@@ -1149,10 +1184,20 @@ exports.removeTransportJobFromRoute = async (req, res) => {
       })
       .populate({
         path: 'stops.transportJobId',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
       });
 
     res.status(200).json({
@@ -1199,7 +1244,7 @@ exports.deleteRoute = async (req, res) => {
       const jobIds = new Set();
       route.stops.forEach(stop => {
         if (stop.transportJobId) {
-          jobIds.add(stop.transportJobId.toString());
+          jobIds.add(getJobIdFromStop(stop.transportJobId));
         }
       });
       for (const jobId of jobIds) {

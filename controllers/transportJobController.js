@@ -138,6 +138,22 @@ exports.getAllTransportJobs = async (req, res) => {
           { path: 'truckId', select: 'truckNumber' }
         ]
       })
+      .populate({
+        path: 'pickupRouteId',
+        select: 'routeNumber status plannedStartDate',
+        populate: [
+          { path: 'driverId', select: 'firstName lastName' },
+          { path: 'truckId', select: 'truckNumber' }
+        ]
+      })
+      .populate({
+        path: 'dropRouteId',
+        select: 'routeNumber status plannedStartDate',
+        populate: [
+          { path: 'driverId', select: 'firstName lastName' },
+          { path: 'truckId', select: 'truckNumber' }
+        ]
+      })
       .populate('createdBy', 'firstName lastName email')
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
@@ -173,6 +189,22 @@ exports.getTransportJobById = async (req, res) => {
       .populate('vehicleId')
       .populate({
         path: 'routeId',
+        populate: [
+          { path: 'driverId', select: 'firstName lastName email phoneNumber' },
+          { path: 'truckId', select: 'truckNumber licensePlate make model year' }
+        ]
+      })
+      .populate({
+        path: 'pickupRouteId',
+        select: 'routeNumber status plannedStartDate plannedEndDate',
+        populate: [
+          { path: 'driverId', select: 'firstName lastName email phoneNumber' },
+          { path: 'truckId', select: 'truckNumber licensePlate make model year' }
+        ]
+      })
+      .populate({
+        path: 'dropRouteId',
+        select: 'routeNumber status plannedStartDate plannedEndDate',
         populate: [
           { path: 'driverId', select: 'firstName lastName email phoneNumber' },
           { path: 'truckId', select: 'truckNumber licensePlate make model year' }

@@ -293,8 +293,9 @@ const updateStatusOnStopsSetup = async (routeId, stops = null) => {
         }
       }
 
-    // Ensure route status is "Planned"
-    if (route.status !== ROUTE_STATUS.PLANNED) {
+    // Only set route status to "Planned" if it hasn't been started yet
+    // Do NOT change status if route is already "In Progress" or completed
+    if (!route.status || route.status === '') {
       route.status = ROUTE_STATUS.PLANNED;
       await route.save();
     }
@@ -303,6 +304,57 @@ const updateStatusOnStopsSetup = async (routeId, stops = null) => {
     // Truck status will be updated to "In Use" when route starts
   } catch (error) {
     console.error('Error updating status on stops setup:', error);
+  }
+};
+
+/**
+ * Helper function to check if a transport job is fully completed (both pickup and drop stops completed)
+ */
+const isTransportJobFullyCompleted = async (transportJobId) => {
+  try {
+    // Find all routes that have stops for this transport job
+    const routesWithJob = await Route.find({
+      $or: [
+        { 'stops.transportJobId': transportJobId },
+        { selectedTransportJobs: transportJobId }
+      ]
+    }).populate('stops');
+
+    let hasPickupStop = false;
+    let hasDropStop = false;
+    let pickupCompleted = false;
+    let dropCompleted = false;
+
+    // Check all routes for this job's stops
+    for (const route of routesWithJob) {
+      if (route.stops && Array.isArray(route.stops)) {
+        route.stops.forEach(stop => {
+          const stopJobId = typeof stop.transportJobId === 'object'
+            ? (stop.transportJobId._id || stop.transportJobId.id)
+            : stop.transportJobId;
+
+          if (stopJobId && stopJobId.toString() === transportJobId.toString()) {
+            if (stop.stopType === 'pickup') {
+              hasPickupStop = true;
+              if (stop.status === ROUTE_STOP_STATUS.COMPLETED) {
+                pickupCompleted = true;
+              }
+            } else if (stop.stopType === 'drop') {
+              hasDropStop = true;
+              if (stop.status === ROUTE_STOP_STATUS.COMPLETED) {
+                dropCompleted = true;
+              }
+            }
+          }
+        });
+      }
+    }
+
+    // Job is fully completed only if it has both pickup and drop stops, and both are completed
+    return hasPickupStop && hasDropStop && pickupCompleted && dropCompleted;
+  } catch (error) {
+    console.error('Error checking if transport job is fully completed:', error);
+    return false;
   }
 };
 
@@ -319,7 +371,7 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
 
     // Get all transport jobs from selectedTransportJobs and stops
     const transportJobIds = new Set();
-    
+
     if (route.selectedTransportJobs && Array.isArray(route.selectedTransportJobs)) {
       route.selectedTransportJobs.forEach(job => {
         const jobId = typeof job === 'object' ? (job._id || job.id) : job;
@@ -330,8 +382,8 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
     if (route.stops && Array.isArray(route.stops)) {
       route.stops.forEach(stop => {
         if (stop.transportJobId) {
-          const jobId = typeof stop.transportJobId === 'object' 
-            ? (stop.transportJobId._id || stop.transportJobId.id) 
+          const jobId = typeof stop.transportJobId === 'object'
+            ? (stop.transportJobId._id || stop.transportJobId.id)
             : stop.transportJobId;
           if (jobId) transportJobIds.add(jobId.toString());
         }
@@ -351,34 +403,9 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
         });
       }
     } else if (newStatus === ROUTE_STATUS.COMPLETED) {
-      // Route completed - check if all stops are completed
-      const allStopsCompleted = route.stops && route.stops.length > 0 
-        ? route.stops.every(stop => stop.status === ROUTE_STOP_STATUS.COMPLETED)
-        : false;
-
-      if (allStopsCompleted) {
-        // All stops completed - mark transport jobs as delivered and recalculate vehicle statuses
-        for (const jobId of transportJobIds) {
-          await TransportJob.findByIdAndUpdate(jobId, {
-            status: TRANSPORT_JOB_STATUS.DELIVERED
-          });
-
-          // Get the transport job to find the vehicle
-          const job = await TransportJob.findById(jobId).populate('vehicleId');
-          if (job && job.vehicleId) {
-            // Recalculate vehicle status based on all transport jobs
-            const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
-            const updateData = { status: newVehicleStatus };
-
-            // Add deliveredAt timestamp if vehicle is now fully delivered
-            if (newVehicleStatus === VEHICLE_STATUS.DELIVERED) {
-              updateData.deliveredAt = new Date();
-            }
-
-            await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, updateData);
-          }
-        }
-      }
+      // Route completed - DO NOT automatically complete transport jobs
+      // Transport jobs are only completed when ALL their stops (pickup + drop) are completed,
+      // regardless of which routes they belong to. This is handled in updateStatusOnStopUpdate.
 
       // Update truck status to Available
       if (route.truckId) {
@@ -390,8 +417,8 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
 
       // Remove currentRouteId from driver profile
       if (route.driverId) {
-        const driverId = typeof route.driverId === 'object' 
-          ? (route.driverId._id || route.driverId.id) 
+        const driverId = typeof route.driverId === 'object'
+          ? (route.driverId._id || route.driverId.id)
           : route.driverId;
         await User.findByIdAndUpdate(driverId, {
           $unset: { currentRouteId: 1 }
@@ -442,22 +469,17 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
     // Use updated stops if provided, otherwise use route.stops
     const stopsToCheck = updatedStops || route.stops;
 
-    // If stop is completed and it's a drop stop, update transport job and recalculate vehicle status
+    // If stop is completed and it's a drop stop, check if transport job is fully completed
     if (newStopStatus === ROUTE_STOP_STATUS.COMPLETED && stopType === 'drop' && transportJobId) {
       const jobId = typeof transportJobId === 'object'
         ? (transportJobId._id || transportJobId.id)
         : transportJobId;
 
-      // Check if all drop stops for this transport job are completed
-      const allDropStopsCompleted = stopsToCheck.filter(stop => {
-        const stopJobId = typeof stop.transportJobId === 'object'
-          ? (stop.transportJobId._id || stop.transportJobId.id)
-          : stop.transportJobId;
-        return stopJobId && stopJobId.toString() === jobId.toString() && stop.stopType === 'drop';
-      }).every(stop => stop.status === ROUTE_STOP_STATUS.COMPLETED);
+      // Check if the transport job is fully completed (both pickup AND drop stops completed across all routes)
+      const isFullyCompleted = await isTransportJobFullyCompleted(jobId);
 
-      if (allDropStopsCompleted) {
-        // All drop stops completed - mark transport job as delivered
+      if (isFullyCompleted) {
+        // Transport job is fully completed - mark as delivered
         await TransportJob.findByIdAndUpdate(jobId, {
           status: TRANSPORT_JOB_STATUS.DELIVERED
         });
@@ -529,45 +551,9 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
           });
         }
 
-        // Update all transport jobs and vehicles as delivered
-        const transportJobIds = new Set();
-        if (route.selectedTransportJobs && Array.isArray(route.selectedTransportJobs)) {
-          route.selectedTransportJobs.forEach(job => {
-            const jobId = typeof job === 'object' ? (job._id || job.id) : job;
-            if (jobId) transportJobIds.add(jobId.toString());
-          });
-        }
-
-        // Also get job IDs from stops (use updated stops)
-        stopsToCheck.forEach(stop => {
-          if (stop.transportJobId) {
-            const jobId = typeof stop.transportJobId === 'object'
-              ? (stop.transportJobId._id || stop.transportJobId.id)
-              : stop.transportJobId;
-            if (jobId) transportJobIds.add(jobId.toString());
-          }
-        });
-
-        for (const jobId of transportJobIds) {
-          await TransportJob.findByIdAndUpdate(jobId, {
-            status: TRANSPORT_JOB_STATUS.DELIVERED
-          });
-
-          // Get the transport job to find the vehicle
-          const job = await TransportJob.findById(jobId).populate('vehicleId');
-          if (job && job.vehicleId) {
-            // Recalculate vehicle status based on all transport jobs
-            const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
-            const updateData = { status: newVehicleStatus };
-
-            // Add deliveredAt timestamp if vehicle is now fully delivered
-            if (newVehicleStatus === VEHICLE_STATUS.DELIVERED) {
-              updateData.deliveredAt = new Date();
-            }
-
-            await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, updateData);
-          }
-        }
+        // DO NOT automatically complete transport jobs when route is completed
+        // Transport jobs should only be completed when ALL their stops (pickup + drop) are completed,
+        // regardless of which routes they belong to. This prevents issues with multi-route transport jobs.
 
         // Create automatic maintenance expense when all stops are completed
         // This ensures expense is created even if updateAllRelatedEntities is not called
@@ -590,18 +576,35 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
 const updateStatusOnTransportJobRemoved = async (transportJobId) => {
   try {
     // Get the transport job first to find the vehicle
-    const job = await TransportJob.findById(transportJobId).select('vehicleId status');
+    const job = await TransportJob.findById(transportJobId).select('vehicleId status pickupRouteId dropRouteId jobNumber');
 
     if (!job) {
       console.error('Transport job not found for removal:', transportJobId);
       return;
     }
 
-    // Reset transport job status to needs dispatch and remove route reference
-    await TransportJob.findByIdAndUpdate(transportJobId, {
-      status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH,
-      $unset: { routeId: 1, assignedDriver: 1 }
-    });
+    // Check if this job still has any route assignments after removal
+    const stillHasPickupRoute = !!job.pickupRouteId;
+    const stillHasDropRoute = !!job.dropRouteId;
+
+    // Only reset to "Needs Dispatch" if the job has NO route assignments left
+    const updateData = {};
+    if (!stillHasPickupRoute && !stillHasDropRoute) {
+      // Job is completely removed from all routes - reset to Needs Dispatch
+      if (job.status !== TRANSPORT_JOB_STATUS.NEEDS_DISPATCH && job.status !== TRANSPORT_JOB_STATUS.DELIVERED) {
+        updateData.status = TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
+        console.log(`✅ Transport job ${job.jobNumber || transportJobId} completely removed from all routes - status reset to Needs Dispatch`);
+      }
+    } else {
+      // Job still has route assignments - don't change status
+      console.log(`✅ Transport job ${job.jobNumber || transportJobId} removed from route but still assigned to other routes - keeping current status`);
+    }
+
+    // NOTE: Route references (pickupRouteId, dropRouteId, routeId) are cleared by updateTransportJobRouteReferences
+    // This function only handles status updates, not route reference clearing
+    updateData.$unset = { assignedDriver: 1 }; // Only clear assigned driver
+
+    await TransportJob.findByIdAndUpdate(transportJobId, updateData);
 
     // Update vehicle status based on all its remaining transport jobs
     if (job.vehicleId) {
@@ -610,6 +613,8 @@ const updateStatusOnTransportJobRemoved = async (transportJobId) => {
         status: newVehicleStatus
       });
     }
+
+    console.log(`✅ Updated transport job ${job.jobNumber || transportJobId} status after removal from route`);
   } catch (error) {
     console.error('Error updating status on transport job removed:', error);
   }
@@ -700,32 +705,10 @@ const updateAllRelatedEntities = async (routeId) => {
       throw new Error('Route not found');
     }
 
-    // Update all transport jobs to 'Delivered'
-    if (route.selectedTransportJobs && route.selectedTransportJobs.length > 0) {
-      for (const job of route.selectedTransportJobs) {
-        if (job.status !== 'Delivered') {
-          await TransportJob.findByIdAndUpdate(job._id, {
-            status: TRANSPORT_JOB_STATUS.DELIVERED,
-            lastUpdatedBy: route.driverId
-          });
-          console.log(`Updated transport job ${job.jobNumber} to Delivered`);
-        }
-      }
-    }
-
-    // Update all vehicles to 'Delivered'
-    if (route.selectedTransportJobs && route.selectedTransportJobs.length > 0) {
-      for (const job of route.selectedTransportJobs) {
-        if (job.vehicleId && job.vehicleId.status !== 'Delivered') {
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id, {
-            status: VEHICLE_STATUS.DELIVERED,
-            deliveredAt: new Date(),
-            lastUpdatedBy: route.driverId
-          });
-          console.log(`Updated vehicle ${job.vehicleId.vin} to Delivered`);
-        }
-      }
-    }
+    // DO NOT automatically update transport jobs or vehicles to 'Delivered'
+    // Transport jobs should only be marked as delivered when ALL their stops (pickup + drop) are completed,
+    // regardless of which routes they belong to. Vehicles should only be marked as delivered when
+    // ALL their transport jobs are completed. This prevents issues with multi-route transport jobs.
 
     // Update truck status to 'Available' if it was 'In Use'
     if (route.truckId && route.truckId.status === 'In Use') {
@@ -969,6 +952,162 @@ const syncRouteStopToTransportJob = async (routeId, stopId) => {
   }
 };
 
+/**
+ * Update transport job route references (pickupRouteId and dropRouteId)
+ * This enables multi-route transport jobs where pickup can be on Route 1 and drop on Route 2
+ * 
+ * @param {string} routeId - The route ID
+ * @param {Array} stops - Array of route stops
+ */
+const updateTransportJobRouteReferences = async (routeId, stops) => {
+  try {
+    if (!stops || !Array.isArray(stops)) {
+      return;
+    }
+
+    // Track which transport jobs have pickup and drop stops in this route
+    const transportJobRoutes = new Map(); // Map<transportJobId, { hasPickup: boolean, hasDrop: boolean }>
+
+    // Scan all stops to find pickup and drop stops
+    for (const stop of stops) {
+      if ((stop.stopType === 'pickup' || stop.stopType === 'drop') && stop.transportJobId) {
+        let jobId = stop.transportJobId;
+        if (typeof jobId === 'object') {
+          jobId = jobId._id || jobId.id;
+        }
+        jobId = jobId.toString();
+
+        if (!transportJobRoutes.has(jobId)) {
+          transportJobRoutes.set(jobId, { hasPickup: false, hasDrop: false });
+        }
+
+        const jobInfo = transportJobRoutes.get(jobId);
+        if (stop.stopType === 'pickup') {
+          jobInfo.hasPickup = true;
+        } else if (stop.stopType === 'drop') {
+          jobInfo.hasDrop = true;
+        }
+      }
+    }
+
+    // Update each transport job with route references
+    for (const [jobId, jobInfo] of transportJobRoutes.entries()) {
+      const transportJob = await TransportJob.findById(jobId);
+      if (!transportJob) continue;
+
+      const updateData = {};
+
+      // Update pickupRouteId if this route has a pickup stop for this job
+      if (jobInfo.hasPickup) {
+        // Check if pickup is already in a different route
+        if (transportJob.pickupRouteId && 
+            transportJob.pickupRouteId.toString() !== routeId.toString()) {
+          console.log(`⚠️  Warning: Transport job ${transportJob.jobNumber || jobId} pickup stop is being moved from route ${transportJob.pickupRouteId} to route ${routeId}`);
+        }
+        updateData.pickupRouteId = routeId;
+      }
+
+      // Update dropRouteId if this route has a drop stop for this job
+      if (jobInfo.hasDrop) {
+        // Check if drop is already in a different route
+        if (transportJob.dropRouteId && 
+            transportJob.dropRouteId.toString() !== routeId.toString()) {
+          console.log(`⚠️  Warning: Transport job ${transportJob.jobNumber || jobId} drop stop is being moved from route ${transportJob.dropRouteId} to route ${routeId}`);
+        }
+        updateData.dropRouteId = routeId;
+      }
+
+      // Only update if there's something to update
+      if (Object.keys(updateData).length > 0) {
+        // Also set routeId for backward compatibility (use pickupRouteId if available, otherwise dropRouteId)
+        if (updateData.pickupRouteId) {
+          updateData.routeId = updateData.pickupRouteId;
+        } else if (updateData.dropRouteId) {
+          updateData.routeId = updateData.dropRouteId;
+        }
+
+        await TransportJob.findByIdAndUpdate(jobId, updateData);
+        console.log(`✅ Updated transport job ${jobId} route references:`, updateData);
+      }
+    }
+
+    // Handle transport jobs that were removed from this route
+    // Find all transport jobs that currently have this route as pickupRouteId or dropRouteId
+    // but are no longer in the stops
+    const transportJobsWithThisRoute = await TransportJob.find({
+      $or: [
+        { pickupRouteId: routeId },
+        { dropRouteId: routeId }
+      ]
+    });
+
+    for (const job of transportJobsWithThisRoute) {
+      const jobId = job._id.toString();
+      const updateData = {};
+      let needsUpdate = false;
+
+      // Check if this job still has a pickup stop in this route
+      const hasPickupInRoute = stops.some(stop => {
+        if (!stop.transportJobId || stop.stopType !== 'pickup') return false;
+        let stopJobId = stop.transportJobId;
+        if (typeof stopJobId === 'object') {
+          stopJobId = stopJobId._id || stopJobId.id;
+        }
+        return stopJobId && stopJobId.toString() === jobId;
+      });
+
+      // Check if this job still has a drop stop in this route
+      const hasDropInRoute = stops.some(stop => {
+        if (!stop.transportJobId || stop.stopType !== 'drop') return false;
+        let stopJobId = stop.transportJobId;
+        if (typeof stopJobId === 'object') {
+          stopJobId = stopJobId._id || stopJobId.id;
+        }
+        return stopJobId && stopJobId.toString() === jobId;
+      });
+
+      // Clear pickupRouteId if pickup stop was removed AND it was assigned to this route
+      if (job.pickupRouteId && job.pickupRouteId.toString() === routeId.toString() && !hasPickupInRoute) {
+        updateData.pickupRouteId = null;
+        needsUpdate = true;
+      }
+
+      // Clear dropRouteId if drop stop was removed AND it was assigned to this route
+      if (job.dropRouteId && job.dropRouteId.toString() === routeId.toString() && !hasDropInRoute) {
+        updateData.dropRouteId = null;
+        needsUpdate = true;
+      }
+
+      // Update routeId for backward compatibility
+      if (needsUpdate) {
+        // Set routeId to the remaining valid route (pickupRouteId or dropRouteId)
+        // If pickupRouteId is being cleared (set to null), use dropRouteId if it exists
+        // If dropRouteId is being cleared, use pickupRouteId if it exists
+        // If both are being cleared, set routeId to null
+        if (updateData.pickupRouteId === null && job.dropRouteId) {
+          // pickupRouteId is being cleared, but dropRouteId still exists
+          updateData.routeId = job.dropRouteId;
+        } else if (updateData.dropRouteId === null && job.pickupRouteId) {
+          // dropRouteId is being cleared, but pickupRouteId still exists
+          updateData.routeId = job.pickupRouteId;
+        } else if (updateData.pickupRouteId === null && updateData.dropRouteId === null) {
+          // Both are being cleared
+          updateData.routeId = null;
+        } else {
+          // Neither is being cleared, keep the existing routeId logic
+          updateData.routeId = job.pickupRouteId || job.dropRouteId;
+        }
+
+        await TransportJob.findByIdAndUpdate(jobId, updateData);
+        console.log(`✅ Cleared transport job ${jobId} route references for removed stops:`, updateData);
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error updating transport job route references:', error);
+    // Don't throw - this is a non-critical update
+  }
+};
+
 module.exports = {
   calculateVehicleStatusFromJobs,
   updateDriverStats,
@@ -982,5 +1121,6 @@ module.exports = {
   updateStatusOnStopUpdate,
   updateStatusOnTransportJobRemoved,
   syncTransportJobToRouteStops,
-  syncRouteStopToTransportJob
+  syncRouteStopToTransportJob,
+  updateTransportJobRouteReferences
 };
