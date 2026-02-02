@@ -32,10 +32,11 @@ exports.globalSearch = async (req, res) => {
           { vin: searchRegex },
           { make: searchRegex },
           { model: searchRegex },
-          { buyerName: searchRegex }
+          { shipperName: searchRegex },
+          { shipperCompany: searchRegex }
         ]
       })
-      .select('vin year make model status buyerName createdAt')
+      .select('vin year make model status shipperName shipperCompany createdAt')
       .populate('transportJobId', 'jobNumber status')
       .limit(searchLimit)
       .sort({ createdAt: -1 }),
@@ -130,7 +131,8 @@ exports.globalSearch = async (req, res) => {
           year: vehicle.year,
           make: vehicle.make,
           model: vehicle.model,
-          buyerName: vehicle.buyerName,
+          shipperName: vehicle.shipperName,
+          shipperCompany: vehicle.shipperCompany,
           transportJob: vehicle.transportJobId
         },
         url: `/vehicles/${vehicle._id}`,
@@ -271,7 +273,8 @@ exports.advancedSearch = async (req, res) => {
               { vin: searchRegex },
               { make: searchRegex },
               { model: searchRegex },
-              { buyerName: searchRegex }
+              { shipperName: searchRegex },
+          { shipperCompany: searchRegex }
             ]
           };
           if (status) query.status = status;
@@ -431,7 +434,8 @@ function formatSearchResult(item, type) {
           year: item.year,
           make: item.make,
           model: item.model,
-          buyerName: item.buyerName,
+          shipperName: item.shipperName,
+          shipperCompany: item.shipperCompany,
           transportJob: item.transportJobId
         },
         url: `/vehicles/${item._id}`,

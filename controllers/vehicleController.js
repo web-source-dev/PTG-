@@ -39,7 +39,8 @@ exports.createVehicle = async (req, res) => {
         make: vehicleData.make,
         model: vehicleData.model,
         source: vehicleData.source,
-        buyerName: vehicleData.buyerName
+        shipperName: vehicleData.shipperName,
+        shipperCompany: vehicleData.shipperCompany
       },
       notes: `Created vehicle ${vehicleData.vin} (${vehicleData.year} ${vehicleData.make} ${vehicleData.model})`
     });
@@ -91,7 +92,8 @@ exports.getAllVehicles = async (req, res) => {
         { vin: { $regex: search, $options: 'i' } },
         { make: { $regex: search, $options: 'i' } },
         { model: { $regex: search, $options: 'i' } },
-        { buyerName: { $regex: search, $options: 'i' } }
+        { shipperName: { $regex: search, $options: 'i' } },
+        { shipperCompany: { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -366,11 +368,12 @@ exports.importFromVOS = async (req, res) => {
       make: vosTransportData.make,
       model: vosTransportData.model,
 
-      // Purchase details
-      purchaseSource: vosTransportData.purchaseSource || 'Central Dispatch Import',
-      purchaseDate: vosTransportData.purchaseDate ? new Date(vosTransportData.purchaseDate) : new Date(),
-      purchasePrice: vosTransportData.purchasePrice || 0,
-      buyerName: vosTransportData.buyerName || 'Central Dispatch',
+      // Shipper details - map from VOS data or use defaults
+      shipperName: vosTransportData.buyerName || vosTransportData.shipperName || 'Central Dispatch',
+      shipperCompany: vosTransportData.shipperCompany || 'Central Dispatch',
+      shipperEmail: vosTransportData.shipperEmail || vosTransportData.createdBy?.email || '',
+      shipperPhone: vosTransportData.shipperPhone || '',
+      submissionDate: vosTransportData.purchaseDate ? new Date(vosTransportData.purchaseDate) : new Date(),
 
       // Documents (copy from VOS if available)
       documents: vosTransportData.documents || [],

@@ -20,20 +20,27 @@ const vehicleSchema = new mongoose.Schema({
     trim: true
   },
 
-  // Purchase Details
-  purchaseSource: {
+  // Shipper Details
+  shipperName: {
     type: String,
     trim: true
   },
-  purchaseDate: {
-    type: Date
-  },
-  purchasePrice: {
-    type: Number
-  },
-  buyerName: {
+  shipperCompany: {
     type: String,
     trim: true
+  },
+  shipperEmail: {
+    type: String,
+    trim: true,
+    lowercase: true
+  },
+  shipperPhone: {
+    type: String,
+    trim: true
+  },
+  submissionDate: {
+    type: Date,
+    default: Date.now
   },
 
   // Documents and Images (any type of file)

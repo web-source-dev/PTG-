@@ -26,5 +26,8 @@ router.delete('/:id', authorizeRoles('ptgAdmin'), routeController.deleteRoute);
 // POST /api/routes/:routeId/remove-transport-job - Remove transport job from route
 router.post('/:routeId/remove-transport-job', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.removeTransportJobFromRoute);
 
+// POST /api/routes/:id/stops/:stopId/complete - Complete a specific stop
+router.post('/:id/stops/:stopId/complete', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.completeRouteStop);
+
 module.exports = router;
 

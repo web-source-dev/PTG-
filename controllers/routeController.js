@@ -703,34 +703,6 @@ exports.updateRoute = async (req, res) => {
           }
         }
       }
-
-      for (let index = 0; index < updateData.stops.length; index++) {
-        const updatedStop = updateData.stops[index];
-        const originalStop = originalStops.find(s => {
-          const origId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
-          const updatedId = updatedStop._id ? updatedStop._id.toString() : (updatedStop.id ? updatedStop.id.toString() : null);
-          return origId && updatedId && origId === updatedId;
-        });
-
-        if (originalStop && updatedStop.status && updatedStop.status !== originalStop.status) {
-          // Update statuses when stop status changes (especially when completed)
-          try {
-            const stopType = updatedStop.stopType || originalStop.stopType;
-            const transportJobId = updatedStop.transportJobId || originalStop.transportJobId;
-            await updateStatusOnStopUpdate(
-              route._id,
-              index,
-              updatedStop.status,
-              stopType,
-              transportJobId,
-              updateData.stops // Pass the updated stops
-            );
-          } catch (stopStatusError) {
-            console.error('Failed to update statuses on stop update:', stopStatusError);
-            // Don't fail the route update if stop status updates fail
-          }
-        }
-      }
     }
 
     // Update route
@@ -743,7 +715,7 @@ exports.updateRoute = async (req, res) => {
       }
     );
 
-    // Sync route stop location changes to transport jobs BEFORE saving the route
+    // Sync route stop location changes to transport jobs AFTER saving the route
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
       console.log(`🔄 Checking ${updateData.stops.length} stops for transport job sync`);
       const originalStops = route.stops || [];
@@ -1212,6 +1184,155 @@ exports.removeTransportJobFromRoute = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to remove transport job from route',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Complete a specific stop in a route
+ * This endpoint handles stop completion and updates vehicle/transport job statuses
+ */
+exports.completeRouteStop = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const stopId = req.params.stopId;
+    const { checklist, notes, photos, actualDate, actualTime } = req.body;
+
+    // Find the route
+    const route = await Route.findById(routeId);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    // Find the stop - handle both ObjectId and string comparisons
+    const stopIndex = route.stops.findIndex(s => {
+      const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+      const stopIdStr = stopId.toString();
+      // Try direct match first
+      if (sId && sId === stopIdStr) return true;
+      // Try matching with fallback ID format (stopType-sequence)
+      if (!sId && s.stopType && s.sequence) {
+        const fallbackId = `${s.stopType}-${s.sequence}`;
+        return fallbackId === stopIdStr;
+      }
+      return false;
+    });
+
+    if (stopIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stop not found'
+      });
+    }
+
+    const originalStop = route.stops[stopIndex];
+    const originalStatus = originalStop.status;
+
+    // Update stop with completion data
+    if (checklist !== undefined) {
+      route.stops[stopIndex].checklist = checklist;
+    }
+    if (notes !== undefined) {
+      route.stops[stopIndex].notes = notes;
+    }
+    if (photos !== undefined) {
+      route.stops[stopIndex].photos = photos;
+    }
+    if (actualDate !== undefined) {
+      route.stops[stopIndex].actualDate = actualDate;
+    }
+    if (actualTime !== undefined) {
+      route.stops[stopIndex].actualTime = actualTime;
+    }
+
+    // Mark stop as completed
+    route.stops[stopIndex].status = 'Completed';
+    if (!route.stops[stopIndex].actualDate) {
+      route.stops[stopIndex].actualDate = new Date();
+    }
+    if (!route.stops[stopIndex].actualTime) {
+      route.stops[stopIndex].actualTime = new Date();
+    }
+
+    // Update lastUpdatedBy
+    route.lastUpdatedBy = req.user ? req.user._id : undefined;
+
+    // Save the route
+    await route.save();
+
+    // Reload route to get updated stops
+    const updatedRoute = await Route.findById(routeId);
+
+    // Update statuses based on stop completion (AFTER route is saved)
+    // This ensures vehicle and transport job statuses are updated
+    try {
+      const stopType = originalStop.stopType;
+      const transportJobId = originalStop.transportJobId;
+      
+      await updateStatusOnStopUpdate(
+        routeId,
+        stopIndex,
+        'Completed',
+        stopType,
+        transportJobId,
+        updatedRoute.stops // Pass the saved route stops
+      );
+    } catch (stopStatusError) {
+      console.error('Failed to update statuses on stop completion:', stopStatusError);
+      // Don't fail the stop completion if status updates fail, but log it
+    }
+
+    // Log stop completion
+    try {
+      await AuditLog.create({
+        action: 'mark_stop_completed',
+        entityType: 'route',
+        entityId: routeId,
+        userId: req.user ? req.user._id : undefined,
+        driverId: route.driverId,
+        routeId,
+        details: {
+          stopId: stopId,
+          stopType: originalStop.stopType,
+          transportJobId: getJobIdFromStop(originalStop.transportJobId)
+        },
+        notes: `Marked ${originalStop.stopType} stop as completed from route view`
+      });
+    } catch (auditError) {
+      console.error('Failed to create audit log for stop completion:', auditError);
+      // Don't fail if audit log creation fails
+    }
+
+    // Populate route for response
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'stops.transportJobId',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status'
+        }
+      })
+      .populate('createdBy', 'firstName lastName email')
+      .populate('lastUpdatedBy', 'firstName lastName email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Stop completed successfully',
+      data: {
+        route: populatedRoute
+      }
+    });
+  } catch (error) {
+    console.error('Error completing stop:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to complete stop',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

@@ -275,7 +275,7 @@ exports.updateTransportJob = async (req, res) => {
       notes: `Updated transport job ${transportJob.jobNumber || req.params.id}`
       });
 
-    // Update vehicle status if transport job status changed
+    // Update vehicle status and transportJobs history if transport job status changed
     if (updateData.status) {
       const { updateStatusOnTransportJobStatusChange } = require('../utils/statusManager');
       await updateStatusOnTransportJobStatusChange(req.params.id);

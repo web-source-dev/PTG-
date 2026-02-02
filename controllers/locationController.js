@@ -274,7 +274,7 @@ exports.getRouteTracking = async (req, res) => {
   }
 };
 
-// Update route tracking location (for automatic polling every 10 seconds)
+// Update route tracking location (for automatic polling every 45 seconds)
 exports.updateRouteTracking = async (req, res) => {
   try {
     const { routeId } = req.params;

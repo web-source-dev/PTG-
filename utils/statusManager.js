@@ -200,15 +200,76 @@ const updateStatusOnTransportJobCreate = async (transportJobId, vehicleId) => {
 };
 
 /**
+ * Helper function to map TransportJob status to vehicle transportJobs array status
+ */
+const mapTransportJobStatusToVehicleHistoryStatus = (transportJobStatus) => {
+  const statusMap = {
+    [TRANSPORT_JOB_STATUS.NEEDS_DISPATCH]: 'pending',
+    [TRANSPORT_JOB_STATUS.DISPATCHED]: 'pending',
+    [TRANSPORT_JOB_STATUS.IN_TRANSIT]: 'in_progress',
+    [TRANSPORT_JOB_STATUS.DELIVERED]: 'completed',
+    [TRANSPORT_JOB_STATUS.CANCELLED]: 'cancelled',
+    [TRANSPORT_JOB_STATUS.EXCEPTION]: 'in_progress'
+  };
+  return statusMap[transportJobStatus] || 'pending';
+};
+
+/**
+ * Update vehicle's transportJobs array when transport job status changes
+ */
+const updateVehicleTransportJobsHistory = async (transportJobId, newStatus) => {
+  try {
+    // Get the transport job to find the vehicle
+    const transportJob = await TransportJob.findById(transportJobId).select('vehicleId status');
+    if (!transportJob || !transportJob.vehicleId) {
+      return;
+    }
+
+    const vehicleId = transportJob.vehicleId._id || transportJob.vehicleId;
+    const mappedStatus = mapTransportJobStatusToVehicleHistoryStatus(newStatus || transportJob.status);
+
+    // Convert transportJobId to ObjectId for proper comparison
+    const mongoose = require('mongoose');
+    const jobObjectId = typeof transportJobId === 'string' 
+      ? new mongoose.Types.ObjectId(transportJobId)
+      : transportJobId;
+
+    // Update the vehicle's transportJobs array
+    // Find the entry with matching transportJobId and update its status
+    await Vehicle.findByIdAndUpdate(
+      vehicleId,
+      {
+        $set: {
+          'transportJobs.$[elem].status': mappedStatus
+        }
+      },
+      {
+        arrayFilters: [
+          { 'elem.transportJobId': jobObjectId }
+        ]
+      }
+    );
+
+    console.log(`✅ Updated vehicle ${vehicleId} transportJobs history: transportJob ${transportJobId} status -> ${mappedStatus}`);
+  } catch (error) {
+    console.error('Error updating vehicle transportJobs history:', error);
+    // Don't throw - this is a non-critical update
+  }
+};
+
+/**
  * Update vehicle status when a transport job status changes
  */
 const updateStatusOnTransportJobStatusChange = async (transportJobId) => {
   try {
     // Get the transport job to find the vehicle
-    const transportJob = await TransportJob.findById(transportJobId).select('vehicleId');
+    const transportJob = await TransportJob.findById(transportJobId).select('vehicleId status');
     if (!transportJob || !transportJob.vehicleId) {
       return;
     }
+
+    // Update vehicle's transportJobs history array
+    await updateVehicleTransportJobsHistory(transportJobId, transportJob.status);
 
     // Calculate and update vehicle status
     const newVehicleStatus = await calculateVehicleStatusFromJobs(transportJob.vehicleId);
@@ -484,6 +545,9 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
           status: TRANSPORT_JOB_STATUS.DELIVERED
         });
 
+        // Update vehicle's transportJobs history array
+        await updateVehicleTransportJobsHistory(jobId, TRANSPORT_JOB_STATUS.DELIVERED);
+
         // Get the transport job to find the vehicle
         const job = await TransportJob.findById(jobId).populate('vehicleId');
         if (job && job.vehicleId) {
@@ -511,6 +575,9 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
       await TransportJob.findByIdAndUpdate(jobId, {
         status: TRANSPORT_JOB_STATUS.IN_TRANSIT
       });
+
+      // Update vehicle's transportJobs history array
+      await updateVehicleTransportJobsHistory(jobId, TRANSPORT_JOB_STATUS.IN_TRANSIT);
 
       // Get the transport job to find the vehicle
       const job = await TransportJob.findById(jobId).populate('vehicleId');
@@ -1028,6 +1095,31 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
 
         await TransportJob.findByIdAndUpdate(jobId, updateData);
         console.log(`✅ Updated transport job ${jobId} route references:`, updateData);
+
+        // Also update the routeId in the vehicle's transportJobs array
+        if (transportJob.vehicleId) {
+          const vehicleId = transportJob.vehicleId._id || transportJob.vehicleId;
+          const mongoose = require('mongoose');
+          const jobObjectId = typeof jobId === 'string' 
+            ? new mongoose.Types.ObjectId(jobId)
+            : jobId;
+
+          // Update routeId in vehicle's transportJobs array
+          await Vehicle.findByIdAndUpdate(
+            vehicleId,
+            {
+              $set: {
+                'transportJobs.$[elem].routeId': routeId
+              }
+            },
+            {
+              arrayFilters: [
+                { 'elem.transportJobId': jobObjectId }
+              ]
+            }
+          );
+          console.log(`✅ Updated vehicle ${vehicleId} transportJobs history: routeId for transportJob ${jobId} -> ${routeId}`);
+        }
       }
     }
 
