@@ -7,7 +7,7 @@ const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
 const CalendarEvent = require('../models/CalendarEvent');
 const locationService = require('../utils/locationService');
-const { ROUTE_STATUS } = require('../constants/status');
+const { ROUTE_STATUS, ROUTE_STOP_STATUS, TRANSPORT_JOB_STATUS, VEHICLE_STATUS } = require('../constants/status');
 const {
   updateStatusOnRouteCreate,
   updateStatusOnStopsSetup,
@@ -1271,18 +1271,27 @@ exports.completeRouteStop = async (req, res) => {
     // This ensures vehicle and transport job statuses are updated
     try {
       const stopType = originalStop.stopType;
-      const transportJobId = originalStop.transportJobId;
+      const transportJobId = getJobIdFromStop(originalStop.transportJobId);
       
-      await updateStatusOnStopUpdate(
-        routeId,
-        stopIndex,
-        'Completed',
-        stopType,
-        transportJobId,
-        updatedRoute.stops // Pass the saved route stops
-      );
+      if (!transportJobId) {
+        console.warn(`⚠️ No transportJobId found for stop ${stopId} (type: ${stopType}) - skipping status update`);
+      } else {
+        console.log(`🔄 Updating statuses for stop completion: route=${routeId}, stopType=${stopType}, transportJobId=${transportJobId}`);
+        
+        await updateStatusOnStopUpdate(
+          routeId,
+          stopIndex,
+          ROUTE_STOP_STATUS.COMPLETED, // Use constant instead of string
+          stopType,
+          transportJobId,
+          updatedRoute.stops // Pass the saved route stops
+        );
+        
+        console.log(`✅ Successfully updated statuses for stop completion: route=${routeId}, transportJobId=${transportJobId}`);
+      }
     } catch (stopStatusError) {
-      console.error('Failed to update statuses on stop completion:', stopStatusError);
+      console.error('❌ Failed to update statuses on stop completion:', stopStatusError);
+      console.error('Error stack:', stopStatusError.stack);
       // Don't fail the stop completion if status updates fail, but log it
     }
 
@@ -1333,6 +1342,154 @@ exports.completeRouteStop = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to complete stop',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Mark a stop as not delivered
+ * This will mark the stop as skipped, cancel the transport job, and update vehicle status
+ */
+exports.markStopNotDelivered = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const stopId = req.params.stopId;
+    const { reason } = req.body;
+
+    if (!reason || reason.trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Reason is required'
+      });
+    }
+
+    // Find the route
+    const route = await Route.findById(routeId);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    // Find the stop
+    const stopIndex = route.stops.findIndex(s => {
+      const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+      const stopIdStr = stopId.toString();
+      if (sId && sId === stopIdStr) return true;
+      if (!sId && s.stopType && s.sequence) {
+        const fallbackId = `${s.stopType}-${s.sequence}`;
+        return fallbackId === stopIdStr;
+      }
+      return false;
+    });
+
+    if (stopIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stop not found'
+      });
+    }
+
+    const stop = route.stops[stopIndex];
+
+    // Only allow this for pickup or drop stops
+    if (stop.stopType !== 'pickup' && stop.stopType !== 'drop') {
+      return res.status(400).json({
+        success: false,
+        message: 'Not delivered action is only available for pickup or drop stops'
+      });
+    }
+
+    // Get transport job ID
+    const transportJobId = getJobIdFromStop(stop.transportJobId);
+    if (!transportJobId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Transport job not found for this stop'
+      });
+    }
+
+    // Mark stop as skipped with reason
+    route.stops[stopIndex].status = ROUTE_STOP_STATUS.SKIPPED;
+    route.stops[stopIndex].notes = route.stops[stopIndex].notes 
+      ? `${route.stops[stopIndex].notes}\n\nNot Delivered Reason: ${reason}`
+      : `Not Delivered Reason: ${reason}`;
+    route.stops[stopIndex].actualDate = new Date();
+    route.stops[stopIndex].actualTime = new Date();
+    route.lastUpdatedBy = req.user ? req.user._id : undefined;
+
+    // Save the route
+    await route.save();
+
+    // Cancel the transport job
+    const transportJob = await TransportJob.findById(transportJobId);
+    if (transportJob) {
+      transportJob.status = TRANSPORT_JOB_STATUS.CANCELLED;
+      await transportJob.save();
+
+      // Update vehicle status based on all transport jobs
+      if (transportJob.vehicleId) {
+        const Vehicle = require('../models/Vehicle');
+        const { calculateVehicleStatusFromJobs, updateVehicleTransportJobsHistory } = require('../utils/statusManager');
+        const newVehicleStatus = await calculateVehicleStatusFromJobs(transportJob.vehicleId);
+        await Vehicle.findByIdAndUpdate(transportJob.vehicleId, {
+          status: newVehicleStatus
+        });
+
+        // Update vehicle's transportJobs history
+        await updateVehicleTransportJobsHistory(transportJobId, TRANSPORT_JOB_STATUS.CANCELLED);
+      }
+    }
+
+    // Create audit log
+    try {
+      await AuditLog.create({
+        action: 'mark_stop_not_delivered',
+        entityType: 'route',
+        entityId: routeId,
+        userId: req.user ? req.user._id : undefined,
+        driverId: route.driverId,
+        routeId,
+        details: {
+          stopId: stopId,
+          stopType: stop.stopType,
+          transportJobId: transportJobId,
+          reason: reason
+        },
+        notes: `Marked ${stop.stopType} stop as not delivered: ${reason}`
+      });
+    } catch (auditError) {
+      console.error('Failed to create audit log for not delivered:', auditError);
+    }
+
+    // Populate route for response
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'stops.transportJobId',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status'
+        }
+      })
+      .populate('createdBy', 'firstName lastName email')
+      .populate('lastUpdatedBy', 'firstName lastName email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Stop marked as not delivered successfully',
+      data: {
+        route: populatedRoute
+      }
+    });
+  } catch (error) {
+    console.error('Error marking stop as not delivered:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to mark stop as not delivered',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

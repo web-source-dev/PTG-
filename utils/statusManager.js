@@ -1202,6 +1202,7 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
 
 module.exports = {
   calculateVehicleStatusFromJobs,
+  updateVehicleTransportJobsHistory,
   updateDriverStats,
   updateAllRelatedEntities,
   updateVehicleOnCreate,

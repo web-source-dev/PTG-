@@ -11,6 +11,9 @@ router.use(optionalAuth);
 // GET /api/vehicles - Get all vehicles (with pagination and filters)
 router.get('/', vehicleController.getAllVehicles);
 
+// GET /api/vehicles/sources - Get all unique sources
+router.get('/sources', vehicleController.getVehicleSources);
+
 // GET /api/vehicles/vin/:vin - Get vehicle by VIN
 router.get('/vin/:vin', vehicleController.getVehicleByVin);
 

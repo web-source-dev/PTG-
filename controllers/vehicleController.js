@@ -17,10 +17,10 @@ exports.createVehicle = async (req, res) => {
       vehicleData.externalUserId = req.externalUser.id;
       vehicleData.externalUserEmail = req.externalUser.email;
       vehicleData.createdBy = null; // Don't link to internal PTG user
-      vehicleData.source = 'VOS'; // VOS API calls
+      vehicleData.source = vehicleData.source || 'VOS'; // VOS API calls, but allow override
     } else {
       vehicleData.createdBy = req.user ? req.user._id : null;
-      vehicleData.source = 'PTG'; // PTG frontend/authenticated users
+      vehicleData.source = vehicleData.source || 'PTG'; // PTG frontend/authenticated users, but allow override
     }
 
     // Create vehicle
@@ -428,6 +428,29 @@ exports.importFromVOS = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to import vehicle from Central Dispatch'
+    });
+  }
+};
+
+/**
+ * Get all unique sources from vehicles
+ */
+exports.getVehicleSources = async (req, res) => {
+  try {
+    const sources = await Vehicle.distinct('source', { source: { $exists: true, $ne: null } });
+    
+    // Sort sources alphabetically
+    const sortedSources = sources.sort();
+    
+    res.status(200).json({
+      success: true,
+      data: sortedSources
+    });
+  } catch (error) {
+    console.error('Error fetching vehicle sources:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch vehicle sources'
     });
   }
 };

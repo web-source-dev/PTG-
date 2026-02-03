@@ -29,5 +29,8 @@ router.post('/:routeId/remove-transport-job', authorizeRoles('ptgAdmin', 'ptgDis
 // POST /api/routes/:id/stops/:stopId/complete - Complete a specific stop
 router.post('/:id/stops/:stopId/complete', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.completeRouteStop);
 
+// POST /api/routes/:id/stops/:stopId/not-delivered - Mark a stop as not delivered
+router.post('/:id/stops/:stopId/not-delivered', authorizeRoles('ptgAdmin', 'ptgDispatcher', 'ptgDriver'), routeController.markStopNotDelivered);
+
 module.exports = router;
 

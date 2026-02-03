@@ -166,19 +166,53 @@ exports.getDriverReport = async (req, res) => {
     const totalCost = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
     const totalCarrierPayment = transportJobs.reduce((sum, tj) => sum + (tj.carrierPayment || 0), 0);
     const totalGallons = expenses.filter(e => e.type === 'fuel' && e.gallons).reduce((sum, e) => sum + (e.gallons || 0), 0);
+    
+    // Calculate expense breakdown by type
+    const expenseBreakdown = {
+      fuel: {
+        count: expenses.filter(e => e.type === 'fuel').length,
+        cost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      maintenance: {
+        count: expenses.filter(e => e.type === 'maintenance').length,
+        cost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      hotel: {
+        count: expenses.filter(e => e.type === 'hotel').length,
+        cost: expenses.filter(e => e.type === 'hotel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      meal: {
+        count: expenses.filter(e => e.type === 'meal').length,
+        cost: expenses.filter(e => e.type === 'meal').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      toll: {
+        count: expenses.filter(e => e.type === 'toll').length,
+        cost: expenses.filter(e => e.type === 'toll').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      parking: {
+        count: expenses.filter(e => e.type === 'parking').length,
+        cost: expenses.filter(e => e.type === 'parking').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      other: {
+        count: expenses.filter(e => e.type === 'other').length,
+        cost: expenses.filter(e => e.type === 'other').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      }
+    };
+    
     const summary = {
       totalRoutes: routes.length,
       totalTransportJobs: transportJobIds.size,
       totalExpenses: expenses.length,
-      totalFuelExpenses: expenses.filter(e => e.type === 'fuel').length,
-      totalMaintenanceExpenses: expenses.filter(e => e.type === 'maintenance').length,
-      totalFuelCost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0),
-      totalMaintenanceCost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0),
+      totalFuelExpenses: expenseBreakdown.fuel.count,
+      totalMaintenanceExpenses: expenseBreakdown.maintenance.count,
+      totalFuelCost: expenseBreakdown.fuel.cost,
+      totalMaintenanceCost: expenseBreakdown.maintenance.cost,
       totalCost,
       totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0), // Already in miles
       totalCarrierPayment,
       netAmount: totalCarrierPayment - totalCost,
-      totalGallons
+      totalGallons,
+      expenseBreakdown // Include full breakdown
     };
 
     res.status(200).json({
@@ -309,20 +343,54 @@ exports.getTruckReport = async (req, res) => {
     const totalCost = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
     const totalCarrierPayment = transportJobs.reduce((sum, tj) => sum + (tj.carrierPayment || 0), 0);
     const totalGallons = expenses.filter(e => e.type === 'fuel' && e.gallons).reduce((sum, e) => sum + (e.gallons || 0), 0);
+    
+    // Calculate expense breakdown by type
+    const expenseBreakdown = {
+      fuel: {
+        count: expenses.filter(e => e.type === 'fuel').length,
+        cost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      maintenance: {
+        count: expenses.filter(e => e.type === 'maintenance').length,
+        cost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      hotel: {
+        count: expenses.filter(e => e.type === 'hotel').length,
+        cost: expenses.filter(e => e.type === 'hotel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      meal: {
+        count: expenses.filter(e => e.type === 'meal').length,
+        cost: expenses.filter(e => e.type === 'meal').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      toll: {
+        count: expenses.filter(e => e.type === 'toll').length,
+        cost: expenses.filter(e => e.type === 'toll').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      parking: {
+        count: expenses.filter(e => e.type === 'parking').length,
+        cost: expenses.filter(e => e.type === 'parking').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      other: {
+        count: expenses.filter(e => e.type === 'other').length,
+        cost: expenses.filter(e => e.type === 'other').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      }
+    };
+    
     const summary = {
       totalRoutes: routes.length,
       totalDrivers: driverIds.size,
       totalTransportJobs: transportJobIds.size,
       totalExpenses: expenses.length,
-      totalFuelExpenses: expenses.filter(e => e.type === 'fuel').length,
-      totalMaintenanceExpenses: expenses.filter(e => e.type === 'maintenance').length,
-      totalFuelCost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0),
-      totalMaintenanceCost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0),
+      totalFuelExpenses: expenseBreakdown.fuel.count,
+      totalMaintenanceExpenses: expenseBreakdown.maintenance.count,
+      totalFuelCost: expenseBreakdown.fuel.cost,
+      totalMaintenanceCost: expenseBreakdown.maintenance.cost,
       totalCost,
       totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0), // Already in miles
       totalGallons,
       totalCarrierPayment,
-      netAmount: totalCarrierPayment - totalCost
+      netAmount: totalCarrierPayment - totalCost,
+      expenseBreakdown // Include full breakdown
     };
 
     res.status(200).json({
@@ -427,19 +495,53 @@ exports.getRouteReport = async (req, res) => {
     // Calculate summary statistics
     const totalCarrierPayment = transportJobs.reduce((sum, tj) => sum + (tj.carrierPayment || 0), 0);
     const totalCost = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
+    
+    // Calculate expense breakdown by type
+    const expenseBreakdown = {
+      fuel: {
+        count: expenses.filter(e => e.type === 'fuel').length,
+        cost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      maintenance: {
+        count: expenses.filter(e => e.type === 'maintenance').length,
+        cost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      hotel: {
+        count: expenses.filter(e => e.type === 'hotel').length,
+        cost: expenses.filter(e => e.type === 'hotel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      meal: {
+        count: expenses.filter(e => e.type === 'meal').length,
+        cost: expenses.filter(e => e.type === 'meal').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      toll: {
+        count: expenses.filter(e => e.type === 'toll').length,
+        cost: expenses.filter(e => e.type === 'toll').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      parking: {
+        count: expenses.filter(e => e.type === 'parking').length,
+        cost: expenses.filter(e => e.type === 'parking').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      },
+      other: {
+        count: expenses.filter(e => e.type === 'other').length,
+        cost: expenses.filter(e => e.type === 'other').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+      }
+    };
+    
     const summary = {
       totalTransportJobs: transportJobIds.size,
       totalExpenses: expenses.length,
-      totalFuelExpenses: expenses.filter(e => e.type === 'fuel').length,
-      totalMaintenanceExpenses: expenses.filter(e => e.type === 'maintenance').length,
-      totalFuelCost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0),
-      totalMaintenanceCost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0),
+      totalFuelExpenses: expenseBreakdown.fuel.count,
+      totalMaintenanceExpenses: expenseBreakdown.maintenance.count,
+      totalFuelCost: expenseBreakdown.fuel.cost,
+      totalMaintenanceCost: expenseBreakdown.maintenance.cost,
       totalCost,
       totalDistance: route.totalDistance?.value || 0,
       totalDuration: route.totalDuration?.value || 0,
       totalCarrierPayment,
       totalGallons: expenses.filter(e => e.type === 'fuel' && e.gallons).reduce((sum, e) => sum + (e.gallons || 0), 0),
-      netAmount: totalCarrierPayment - totalCost
+      netAmount: totalCarrierPayment - totalCost,
+      expenseBreakdown // Include full breakdown
     };
 
     res.status(200).json({
@@ -632,6 +734,38 @@ exports.getAllTrucksReport = async (req, res) => {
         const totalGallons = expenses.filter(e => e.type === 'fuel' && e.gallons).reduce((sum, e) => sum + (e.gallons || 0), 0);
         const totalCarrierPayment = transportJobs.reduce((sum, tj) => sum + (tj.carrierPayment || 0), 0);
 
+        // Calculate expense breakdown by type
+        const expenseBreakdown = {
+          fuel: {
+            count: expenses.filter(e => e.type === 'fuel').length,
+            cost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          maintenance: {
+            count: expenses.filter(e => e.type === 'maintenance').length,
+            cost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          hotel: {
+            count: expenses.filter(e => e.type === 'hotel').length,
+            cost: expenses.filter(e => e.type === 'hotel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          meal: {
+            count: expenses.filter(e => e.type === 'meal').length,
+            cost: expenses.filter(e => e.type === 'meal').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          toll: {
+            count: expenses.filter(e => e.type === 'toll').length,
+            cost: expenses.filter(e => e.type === 'toll').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          parking: {
+            count: expenses.filter(e => e.type === 'parking').length,
+            cost: expenses.filter(e => e.type === 'parking').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          other: {
+            count: expenses.filter(e => e.type === 'other').length,
+            cost: expenses.filter(e => e.type === 'other').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          }
+        };
+
         return {
           truck: {
             _id: truck._id,
@@ -644,14 +778,15 @@ exports.getAllTrucksReport = async (req, res) => {
           },
           totalRoutes: routesCount,
           totalExpenses: expenses.length,
-          totalFuelExpenses: expenses.filter(e => e.type === 'fuel').length,
-          totalMaintenanceExpenses: expenses.filter(e => e.type === 'maintenance').length,
+          totalFuelExpenses: expenseBreakdown.fuel.count,
+          totalMaintenanceExpenses: expenseBreakdown.maintenance.count,
           totalCost,
           totalFuelCost,
           totalMaintenanceCost,
           totalGallons,
           totalCarrierPayment,
-          netAmount: totalCarrierPayment - totalCost
+          netAmount: totalCarrierPayment - totalCost,
+          expenseBreakdown // Include full breakdown
         };
       })
     );
@@ -740,6 +875,38 @@ exports.getAllRoutesReport = async (req, res) => {
         const totalMaintenanceCost = maintenanceExpenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
         const totalExpensesCost = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
 
+        // Calculate expense breakdown by type
+        const expenseBreakdown = {
+          fuel: {
+            count: expenses.filter(e => e.type === 'fuel').length,
+            cost: expenses.filter(e => e.type === 'fuel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          maintenance: {
+            count: expenses.filter(e => e.type === 'maintenance').length,
+            cost: expenses.filter(e => e.type === 'maintenance').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          hotel: {
+            count: expenses.filter(e => e.type === 'hotel').length,
+            cost: expenses.filter(e => e.type === 'hotel').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          meal: {
+            count: expenses.filter(e => e.type === 'meal').length,
+            cost: expenses.filter(e => e.type === 'meal').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          toll: {
+            count: expenses.filter(e => e.type === 'toll').length,
+            cost: expenses.filter(e => e.type === 'toll').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          parking: {
+            count: expenses.filter(e => e.type === 'parking').length,
+            cost: expenses.filter(e => e.type === 'parking').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          },
+          other: {
+            count: expenses.filter(e => e.type === 'other').length,
+            cost: expenses.filter(e => e.type === 'other').reduce((sum, e) => sum + (e.totalCost || 0), 0)
+          }
+        };
+
         // Calculate net amount (carrier payment - total expenses)
         const netAmount = totalCarrierPayment - totalExpensesCost;
 
@@ -769,13 +936,14 @@ exports.getAllRoutesReport = async (req, res) => {
           },
           totalTransportJobs: transportJobIds.size,
           totalExpenses: expenses.length,
-          totalFuelExpenses: fuelExpenses.length,
-          totalMaintenanceExpenses: maintenanceExpenses.length,
+          totalFuelExpenses: expenseBreakdown.fuel.count,
+          totalMaintenanceExpenses: expenseBreakdown.maintenance.count,
           totalFuelCost,
           totalMaintenanceCost,
           totalExpensesCost,
           totalCarrierPayment,
-          netAmount
+          netAmount,
+          expenseBreakdown // Include full breakdown
         };
       })
     );
