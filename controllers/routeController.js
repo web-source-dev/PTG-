@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
+const Vehicle = require('../models/Vehicle');
 const Truck = require('../models/Truck');
 const User = require('../models/User');
 const RouteTracking = require('../models/routeTracker');
@@ -287,7 +288,7 @@ exports.createRoute = async (req, res) => {
         select: 'jobNumber status vehicleId carrier carrierPayment',
         populate: {
           path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
         }
       })
       .populate({
@@ -296,7 +297,7 @@ exports.createRoute = async (req, res) => {
         populate: [
           {
             path: 'vehicleId',
-            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+            select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -420,7 +421,7 @@ exports.getRouteById = async (req, res) => {
         select: 'jobNumber status vehicleId carrier carrierPayment',
         populate: {
           path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
         }
       })
       .populate({
@@ -428,7 +429,7 @@ exports.getRouteById = async (req, res) => {
         populate: [
           {
             path: 'vehicleId',
-            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+            select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -1051,7 +1052,7 @@ exports.updateRoute = async (req, res) => {
         select: 'jobNumber status vehicleId carrier carrierPayment',
         populate: {
           path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
         }
       })
       .populate({
@@ -1059,7 +1060,7 @@ exports.updateRoute = async (req, res) => {
         populate: [
           {
             path: 'vehicleId',
-            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+            select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -1151,7 +1152,7 @@ exports.removeTransportJobFromRoute = async (req, res) => {
         select: 'jobNumber status vehicleId carrier carrierPayment',
         populate: {
           path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
         }
       })
       .populate({
@@ -1159,7 +1160,7 @@ exports.removeTransportJobFromRoute = async (req, res) => {
         populate: [
           {
             path: 'vehicleId',
-            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+            select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -1490,6 +1491,194 @@ exports.markStopNotDelivered = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to mark stop as not delivered',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Manually update stop, transport job, and vehicle statuses
+ * This endpoint allows admins/dispatchers to manually fix status inconsistencies
+ */
+exports.manualUpdateStopStatuses = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const stopId = req.params.stopId;
+    const { stopStatus, transportJobStatus, vehicleStatus } = req.body;
+
+    // At least one status must be provided
+    if (!stopStatus && !transportJobStatus && !vehicleStatus) {
+      return res.status(400).json({
+        success: false,
+        message: 'At least one status (stopStatus, transportJobStatus, or vehicleStatus) must be provided'
+      });
+    }
+
+    // Find the route
+    const route = await Route.findById(routeId);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    // Find the stop
+    const stopIndex = route.stops.findIndex(s => {
+      const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+      const stopIdStr = stopId.toString();
+      if (sId && sId === stopIdStr) return true;
+      if (!sId && s.stopType && s.sequence) {
+        const fallbackId = `${s.stopType}-${s.sequence}`;
+        return fallbackId === stopIdStr;
+      }
+      return false;
+    });
+
+    if (stopIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stop not found'
+      });
+    }
+
+    const stop = route.stops[stopIndex];
+    const transportJobId = getJobIdFromStop(stop.transportJobId);
+    const updates = [];
+    const oldValues = {};
+
+    // Update stop status if provided
+    if (stopStatus) {
+      if (!Object.values(ROUTE_STOP_STATUS).includes(stopStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid stop status: ${stopStatus}. Valid values: ${Object.values(ROUTE_STOP_STATUS).join(', ')}`
+        });
+      }
+      oldValues.stopStatus = stop.status;
+      route.stops[stopIndex].status = stopStatus;
+      updates.push(`Stop status: ${oldValues.stopStatus || 'N/A'} → ${stopStatus}`);
+    }
+
+    // Update transport job status if provided
+    let transportJob = null;
+    if (transportJobStatus && transportJobId) {
+      if (!Object.values(TRANSPORT_JOB_STATUS).includes(transportJobStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid transport job status: ${transportJobStatus}. Valid values: ${Object.values(TRANSPORT_JOB_STATUS).join(', ')}`
+        });
+      }
+      transportJob = await TransportJob.findById(transportJobId);
+      if (transportJob) {
+        oldValues.transportJobStatus = transportJob.status;
+        transportJob.status = transportJobStatus;
+        await transportJob.save();
+
+        // Update vehicle's transportJobs history
+        const { updateVehicleTransportJobsHistory } = require('../utils/statusManager');
+        await updateVehicleTransportJobsHistory(transportJobId, transportJobStatus);
+
+        updates.push(`Transport job ${transportJob.jobNumber || transportJobId} status: ${oldValues.transportJobStatus} → ${transportJobStatus}`);
+      }
+    }
+
+    // Update vehicle status if provided
+    let vehicle = null;
+    if (vehicleStatus) {
+      if (!Object.values(VEHICLE_STATUS).includes(vehicleStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid vehicle status: ${vehicleStatus}. Valid values: ${Object.values(VEHICLE_STATUS).join(', ')}`
+        });
+      }
+
+      // Get vehicle ID from transport job if available
+      let vehicleId = null;
+      if (transportJobId) {
+        const job = transportJob || await TransportJob.findById(transportJobId).select('vehicleId');
+        if (job && job.vehicleId) {
+          vehicleId = job.vehicleId._id || job.vehicleId;
+        }
+      }
+
+      if (!vehicleId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot update vehicle status: No vehicle associated with this stop'
+        });
+      }
+
+      vehicle = await Vehicle.findById(vehicleId);
+      if (vehicle) {
+        oldValues.vehicleStatus = vehicle.status;
+        vehicle.status = vehicleStatus;
+        
+        // Add deliveredAt timestamp if vehicle is now delivered
+        if (vehicleStatus === VEHICLE_STATUS.DELIVERED) {
+          vehicle.deliveredAt = new Date();
+        }
+        
+        await vehicle.save();
+        updates.push(`Vehicle ${vehicle.vin || vehicleId} status: ${oldValues.vehicleStatus} → ${vehicleStatus}`);
+      }
+    }
+
+    // Save route if stop status was updated
+    if (stopStatus) {
+      route.lastUpdatedBy = req.user ? req.user._id : undefined;
+      await route.save();
+    }
+
+    // Create audit log
+    await AuditLog.create({
+      action: 'manual_status_update',
+      entityType: 'route',
+      entityId: routeId,
+      userId: req.user ? req.user._id : undefined,
+      driverId: route.driverId,
+      routeId,
+      details: {
+        stopId: stopId,
+        stopType: stop.stopType,
+        transportJobId: transportJobId,
+        oldValues: oldValues,
+        newValues: {
+          stopStatus: stopStatus || stop.status,
+          transportJobStatus: transportJobStatus || (transportJob ? transportJob.status : null),
+          vehicleStatus: vehicleStatus || (vehicle ? vehicle.status : null)
+        }
+      },
+      notes: `Manual status update: ${updates.join('; ')}`
+    });
+
+    // Populate route for response
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'stops.transportJobId',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status'
+        }
+      })
+      .populate('createdBy', 'firstName lastName email')
+      .populate('lastUpdatedBy', 'firstName lastName email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Statuses updated successfully',
+      data: {
+        route: populatedRoute,
+        updates: updates
+      }
+    });
+  } catch (error) {
+    console.error('Error manually updating statuses:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to manually update statuses',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

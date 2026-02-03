@@ -26,7 +26,9 @@ const auditLogSchema = new mongoose.Schema({
       // Authentication actions
       'user_login', 'user_login_failed', 'password_reset_requested', 'password_reset_successful',
       // Location actions
-      'update_driver_location'
+      'update_driver_location',
+      // Manual status update actions
+      'manual_status_update'
     ]
   },
 
