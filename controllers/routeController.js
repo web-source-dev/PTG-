@@ -8,7 +8,7 @@ const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
 const CalendarEvent = require('../models/CalendarEvent');
 const locationService = require('../utils/locationService');
-const { ROUTE_STATUS, ROUTE_STOP_STATUS, TRANSPORT_JOB_STATUS, VEHICLE_STATUS } = require('../constants/status');
+const { ROUTE_STATUS, ROUTE_STOP_STATUS, TRANSPORT_JOB_STATUS, VEHICLE_STATUS, TRUCK_STATUS } = require('../constants/status');
 const {
   updateStatusOnRouteCreate,
   updateStatusOnStopsSetup,
@@ -1679,6 +1679,267 @@ exports.manualUpdateStopStatuses = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to manually update statuses',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Complete route - marks route as completed and completes all pending/in-progress stops
+ * Only updates transport jobs and vehicles that are not already cancelled or delivered
+ */
+exports.completeRoute = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const userId = req.user?._id;
+    const userRole = req.user?.role;
+
+    // Find the route
+    const route = await Route.findById(routeId)
+      .populate('stops.transportJobId');
+    
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    // If user is a driver, verify they own this route
+    if (userRole === 'ptgDriver') {
+      const driverId = typeof route.driverId === 'object' 
+        ? (route.driverId._id || route.driverId.id) 
+        : route.driverId;
+      
+      if (!driverId || driverId.toString() !== userId.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: 'You do not have permission to complete this route'
+        });
+      }
+    }
+
+    // Check if route is already completed
+    if (route.status === ROUTE_STATUS.COMPLETED) {
+      return res.status(400).json({
+        success: false,
+        message: 'Route is already completed'
+      });
+    }
+
+    const oldStatus = route.status;
+    const completedStops = [];
+    const skippedStops = [];
+    const processedTransportJobs = new Set();
+    const processedVehicles = new Set();
+    const transportJobIdsToProcess = new Set();
+
+    // First pass: Mark all pending/in-progress stops as completed and collect transport job IDs
+    for (let i = 0; i < route.stops.length; i++) {
+      const stop = route.stops[i];
+      const stopId = stop._id ? stop._id.toString() : `${stop.stopType}-${stop.sequence}`;
+      
+      // Only process stops that are pending or in progress
+      if (stop.status === ROUTE_STOP_STATUS.PENDING || stop.status === ROUTE_STOP_STATUS.IN_PROGRESS) {
+        // Mark stop as completed
+        route.stops[i].status = ROUTE_STOP_STATUS.COMPLETED;
+        if (!route.stops[i].actualDate) {
+          route.stops[i].actualDate = new Date();
+        }
+        if (!route.stops[i].actualTime) {
+          route.stops[i].actualTime = new Date();
+        }
+        completedStops.push(stopId);
+
+        // Collect transport job IDs for processing after route is saved
+        const transportJobId = getJobIdFromStop(stop.transportJobId);
+        if (transportJobId) {
+          transportJobIdsToProcess.add(transportJobId);
+        }
+      } else if (stop.status === ROUTE_STOP_STATUS.COMPLETED || stop.status === ROUTE_STOP_STATUS.SKIPPED) {
+        // Track already completed/skipped stops
+        if (stop.status === ROUTE_STOP_STATUS.SKIPPED) {
+          skippedStops.push(stopId);
+        }
+      }
+    }
+
+    // Mark route as completed
+    route.status = ROUTE_STATUS.COMPLETED;
+    route.actualEndDate = new Date();
+    route.lastUpdatedBy = req.user ? req.user._id : undefined;
+
+    // Save the route first so that isTransportJobFullyCompleted can see the updated stops
+    await route.save();
+
+    // Second pass: Process transport jobs and vehicles now that route is saved
+    for (const transportJobId of transportJobIdsToProcess) {
+      if (processedTransportJobs.has(transportJobId)) continue;
+      processedTransportJobs.add(transportJobId);
+      
+      try {
+        const transportJob = await TransportJob.findById(transportJobId).populate('vehicleId');
+        if (!transportJob) continue;
+
+        // Only update if not already cancelled or delivered
+        if (transportJob.status === TRANSPORT_JOB_STATUS.CANCELLED || 
+            transportJob.status === TRANSPORT_JOB_STATUS.DELIVERED) {
+          continue;
+        }
+
+        // Find all stops for this transport job in the current route
+        const jobStops = route.stops.filter(s => {
+          const jobId = getJobIdFromStop(s.transportJobId);
+          return jobId && jobId.toString() === transportJobId.toString();
+        });
+
+        const hasPickupStop = jobStops.some(s => s.stopType === 'pickup');
+        const hasDropStop = jobStops.some(s => s.stopType === 'drop');
+        const pickupCompleted = jobStops.some(s => s.stopType === 'pickup' && s.status === ROUTE_STOP_STATUS.COMPLETED);
+        const dropCompleted = jobStops.some(s => s.stopType === 'drop' && s.status === ROUTE_STOP_STATUS.COMPLETED);
+
+        // If this route has a pickup stop that was just completed, mark job as In Transit
+        if (hasPickupStop && pickupCompleted && transportJob.status !== TRANSPORT_JOB_STATUS.IN_TRANSIT) {
+          transportJob.status = TRANSPORT_JOB_STATUS.IN_TRANSIT;
+          await transportJob.save();
+
+          // Update vehicle's transportJobs history
+          const { updateVehicleTransportJobsHistory } = require('../utils/statusManager');
+          await updateVehicleTransportJobsHistory(transportJobId, TRANSPORT_JOB_STATUS.IN_TRANSIT);
+        }
+
+        // If this route has a drop stop, check if transport job is fully completed across all routes
+        if (hasDropStop && dropCompleted) {
+          const { isTransportJobFullyCompleted } = require('../utils/statusManager');
+          const isFullyCompleted = await isTransportJobFullyCompleted(transportJobId);
+
+          if (isFullyCompleted && transportJob.status !== TRANSPORT_JOB_STATUS.DELIVERED) {
+            // Mark as Delivered
+            transportJob.status = TRANSPORT_JOB_STATUS.DELIVERED;
+            await transportJob.save();
+
+            // Update vehicle's transportJobs history
+            const { updateVehicleTransportJobsHistory } = require('../utils/statusManager');
+            await updateVehicleTransportJobsHistory(transportJobId, TRANSPORT_JOB_STATUS.DELIVERED);
+          }
+        }
+
+        // Update vehicle if not cancelled or delivered
+        if (transportJob.vehicleId) {
+          const vehicleId = typeof transportJob.vehicleId === 'object'
+            ? (transportJob.vehicleId._id || transportJob.vehicleId.id)
+            : transportJob.vehicleId;
+          
+          if (vehicleId && !processedVehicles.has(vehicleId.toString())) {
+            processedVehicles.add(vehicleId.toString());
+            const vehicle = await Vehicle.findById(vehicleId);
+            if (vehicle && vehicle.status !== VEHICLE_STATUS.CANCELLED && 
+                vehicle.status !== VEHICLE_STATUS.DELIVERED) {
+              const { calculateVehicleStatusFromJobs } = require('../utils/statusManager');
+              const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
+              const updateData = { status: newVehicleStatus };
+
+              // Add deliveredAt timestamp if vehicle is now fully delivered
+              if (newVehicleStatus === VEHICLE_STATUS.DELIVERED) {
+                updateData.deliveredAt = new Date();
+              }
+
+              await Vehicle.findByIdAndUpdate(vehicleId, updateData);
+            }
+          }
+        }
+      } catch (jobError) {
+        console.error(`Error processing transport job ${transportJobId}:`, jobError);
+        // Continue processing other jobs even if one fails
+      }
+    }
+
+    // Update truck status to Available
+    if (route.truckId) {
+      const Truck = require('../models/Truck');
+      const truckId = typeof route.truckId === 'object' 
+        ? (route.truckId._id || route.truckId.id) 
+        : route.truckId;
+      await Truck.findByIdAndUpdate(truckId, {
+        status: TRUCK_STATUS.AVAILABLE,
+        currentDriver: undefined
+      });
+    }
+
+    // Remove currentRouteId from driver profile
+    if (route.driverId) {
+      const driverId = typeof route.driverId === 'object'
+        ? (route.driverId._id || route.driverId.id)
+        : route.driverId;
+      await User.findByIdAndUpdate(driverId, {
+        $unset: { currentRouteId: 1 }
+      });
+    }
+
+    // Create maintenance expense for route
+    try {
+      const { createMaintenanceExpenseForRoute } = require('../utils/statusManager');
+      await createMaintenanceExpenseForRoute(routeId);
+    } catch (expenseError) {
+      console.error('Failed to create maintenance expense when completing route:', expenseError);
+      // Don't fail route completion if expense creation fails
+    }
+
+    // Create audit log
+    try {
+      await AuditLog.create({
+        action: 'complete_route',
+        entityType: 'route',
+        entityId: routeId,
+        userId: req.user ? req.user._id : undefined,
+        driverId: route.driverId,
+        routeId,
+        details: {
+          oldStatus,
+          newStatus: ROUTE_STATUS.COMPLETED,
+          completedStopsCount: completedStops.length,
+          skippedStopsCount: skippedStops.length,
+          processedTransportJobsCount: processedTransportJobs.size,
+          processedVehiclesCount: processedVehicles.size
+        },
+        notes: `Route ${route.routeNumber || routeId} completed. ${completedStops.length} stops marked as completed.`
+      });
+    } catch (auditError) {
+      console.error('Failed to create audit log for route completion:', auditError);
+    }
+
+    // Populate route for response
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'stops.transportJobId',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status'
+        }
+      })
+      .populate('createdBy', 'firstName lastName email')
+      .populate('lastUpdatedBy', 'firstName lastName email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Route completed successfully',
+      data: {
+        route: populatedRoute,
+        summary: {
+          completedStops: completedStops.length,
+          skippedStops: skippedStops.length,
+          processedTransportJobs: processedTransportJobs.size,
+          processedVehicles: processedVehicles.size
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error completing route:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to complete route',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

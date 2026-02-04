@@ -35,5 +35,8 @@ router.post('/:id/stops/:stopId/not-delivered', authorizeRoles('ptgAdmin', 'ptgD
 // PUT /api/routes/:id/stops/:stopId/manual-status-update - Manually update stop, transport job, and vehicle statuses
 router.put('/:id/stops/:stopId/manual-status-update', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.manualUpdateStopStatuses);
 
+// POST /api/routes/:id/complete - Complete route (marks route and all pending/in-progress stops as completed)
+router.post('/:id/complete', authorizeRoles('ptgAdmin', 'ptgDispatcher', 'ptgDriver'), routeController.completeRoute);
+
 module.exports = router;
 

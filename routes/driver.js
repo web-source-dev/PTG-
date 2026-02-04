@@ -21,5 +21,9 @@ router.put('/routes/:id', driverController.updateMyRoute);
 // PUT /api/driver/routes/:id/stops/:stopId - Update a specific stop
 router.put('/routes/:id/stops/:stopId', driverController.updateMyRouteStop);
 
+// POST /api/driver/routes/:id/complete - Complete route (marks route and all pending/in-progress stops as completed)
+const routeController = require('../controllers/routeController');
+router.post('/routes/:id/complete', routeController.completeRoute);
+
 module.exports = router;
 
