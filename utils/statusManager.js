@@ -76,7 +76,6 @@ const createMaintenanceExpenseForRoute = async (routeId) => {
     });
 
     if (existingExpense) {
-      console.log(`Maintenance expense already exists for route ${route.routeNumber || routeId}`);
       return; // Expense already created, skip
     }
 
@@ -94,7 +93,7 @@ const createMaintenanceExpenseForRoute = async (routeId) => {
       createdBy: driverId
     });
 
-    console.log(`Created automatic maintenance expense for route ${route.routeNumber || routeId}: $${maintenanceCost.toFixed(2)} (${miles.toFixed(2)} miles × $${truck.maintenanceRate.toFixed(2)}/mile)`);
+
   } catch (error) {
     console.error('Error creating automatic maintenance expense for route:', error);
     throw error;
@@ -250,7 +249,6 @@ const updateVehicleTransportJobsHistory = async (transportJobId, newStatus) => {
       }
     );
 
-    console.log(`✅ Updated vehicle ${vehicleId} transportJobs history: transportJob ${transportJobId} status -> ${mappedStatus}`);
   } catch (error) {
     console.error('Error updating vehicle transportJobs history:', error);
     // Don't throw - this is a non-critical update
@@ -660,11 +658,7 @@ const updateStatusOnTransportJobRemoved = async (transportJobId) => {
       // Job is completely removed from all routes - reset to Needs Dispatch
       if (job.status !== TRANSPORT_JOB_STATUS.NEEDS_DISPATCH && job.status !== TRANSPORT_JOB_STATUS.DELIVERED) {
         updateData.status = TRANSPORT_JOB_STATUS.NEEDS_DISPATCH;
-        console.log(`✅ Transport job ${job.jobNumber || transportJobId} completely removed from all routes - status reset to Needs Dispatch`);
       }
-    } else {
-      // Job still has route assignments - don't change status
-      console.log(`✅ Transport job ${job.jobNumber || transportJobId} removed from route but still assigned to other routes - keeping current status`);
     }
 
     // NOTE: Route references (pickupRouteId, dropRouteId, routeId) are cleared by updateTransportJobRouteReferences
@@ -681,7 +675,6 @@ const updateStatusOnTransportJobRemoved = async (transportJobId) => {
       });
     }
 
-    console.log(`✅ Updated transport job ${job.jobNumber || transportJobId} status after removal from route`);
   } catch (error) {
     console.error('Error updating status on transport job removed:', error);
   }
@@ -724,7 +717,6 @@ const updateDriverStats = async (routeId, driverId) => {
     driver.driverStats.totalDistanceTraveled += distanceTraveled;
 
     await driver.save();
-    console.log(`Updated driver ${driverId} stats: +${loadsMoved} loads, +${distanceTraveled} miles`);
 
     // Also update truck stats if truck is assigned
     if (route.truckId) {
@@ -742,7 +734,6 @@ const updateDriverStats = async (routeId, driverId) => {
         truck.truckStats.totalLoadsMoved += loadsMoved;
         truck.truckStats.totalDistanceTraveled += distanceTraveled;
         await truck.save();
-        console.log(`Updated truck ${route.truckId} stats: +${loadsMoved} loads, +${distanceTraveled} miles`);
       }
     }
   } catch (error) {
@@ -757,8 +748,6 @@ const updateDriverStats = async (routeId, driverId) => {
  */
 const updateAllRelatedEntities = async (routeId) => {
   try {
-    console.log(`Updating all related entities for completed route ${routeId}`);
-
     // Get the completed route with all related data
     const route = await Route.findById(routeId)
       .populate({
@@ -782,7 +771,6 @@ const updateAllRelatedEntities = async (routeId) => {
       await Truck.findByIdAndUpdate(route.truckId._id, {
         status: TRUCK_STATUS.AVAILABLE
       });
-      console.log(`Updated truck ${route.truckId.truckNumber} to Available`);
     }
 
     // Create automatic maintenance expense based on truck maintenance rate
@@ -792,8 +780,6 @@ const updateAllRelatedEntities = async (routeId) => {
       console.error('Error creating automatic maintenance expense:', expenseError);
       // Don't fail the route completion if expense creation fails
     }
-
-    console.log(`Successfully updated all related entities for route ${route.routeNumber}`);
 
   } catch (error) {
     console.error('Error updating all related entities:', error);
@@ -840,9 +826,7 @@ const createSafeDate = (dateStr, timeStr) => {
  * and update the corresponding route stops with the new transport job information
  */
 const syncTransportJobToRouteStops = async (transportJobId) => {
-  try {
-    console.log(`🔄 Starting sync from transport job ${transportJobId} to route stops`);
-
+  try { 
     // Get the updated transport job
     const transportJob = await TransportJob.findById(transportJobId);
     if (!transportJob) {
@@ -855,16 +839,12 @@ const syncTransportJobToRouteStops = async (transportJobId) => {
       'stops.transportJobId': transportJobId
     });
 
-    console.log(`📋 Found ${routes.length} routes with stops referencing transport job ${transportJobId}`);
-
     for (const route of routes) {
       let routeUpdated = false;
 
       // Update stops that reference this transport job
       const updatedStops = route.stops.map(stop => {
         if (stop.transportJobId && stop.transportJobId.toString() === transportJobId.toString()) {
-          console.log(`🔄 Updating stop ${stop._id} in route ${route._id} with new transport job data`);
-
           // Update stop information based on transport job data
           // For pickup stops, sync pickup location and schedule
           if (stop.stopType === 'pickup') {
@@ -908,11 +888,9 @@ const syncTransportJobToRouteStops = async (transportJobId) => {
         route.stops = updatedStops;
         await route.save();
         routeUpdated = true;
-        console.log(`✅ Updated route ${route._id} with new transport job data`);
       }
     }
 
-    console.log(`✅ Completed sync from transport job ${transportJobId} to route stops`);
   } catch (error) {
     console.error(`❌ Error syncing transport job ${transportJobId} to route stops:`, error);
     throw error;
@@ -925,8 +903,6 @@ const syncTransportJobToRouteStops = async (transportJobId) => {
  */
 const syncRouteStopToTransportJob = async (routeId, stopId) => {
   try {
-    console.log(`🔄 Starting sync from route stop ${stopId} in route ${routeId} to transport job`);
-
     // Get the route with the updated stop
     const route = await Route.findById(routeId);
     if (!route || !route.stops) {
@@ -950,11 +926,8 @@ const syncRouteStopToTransportJob = async (routeId, stopId) => {
 
     // Only sync if this is a pickup or drop stop with a transport job reference
     if ((stop.stopType !== 'pickup' && stop.stopType !== 'drop') || !stop.transportJobId) {
-      console.log(`ℹ️ Stop ${stopId} is not a pickup/drop stop or has no transport job reference, skipping sync`);
       return;
     }
-
-    console.log(`📋 Processing ${stop.stopType} stop ${stopId} for transport job ${stop.transportJobId}`);
 
     // Get the transport job
     const transportJob = await TransportJob.findById(stop.transportJobId);
@@ -1009,10 +982,7 @@ const syncRouteStopToTransportJob = async (routeId, stopId) => {
     if (Object.keys(updateData).length > 0) {
       await TransportJob.findByIdAndUpdate(transportJob._id, updateData);
       jobUpdated = true;
-      console.log(`✅ Updated transport job ${transportJob._id} with new stop data:`, updateData);
     }
-
-    console.log(`✅ Completed sync from route stop ${stopId} to transport job ${transportJob._id}`);
   } catch (error) {
     console.error(`❌ Error syncing route stop ${stopId} to transport job:`, error);
     throw error;
@@ -1069,8 +1039,7 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
         // Check if pickup is already in a different route
         if (transportJob.pickupRouteId && 
             transportJob.pickupRouteId.toString() !== routeId.toString()) {
-          console.log(`⚠️  Warning: Transport job ${transportJob.jobNumber || jobId} pickup stop is being moved from route ${transportJob.pickupRouteId} to route ${routeId}`);
-        }
+         }
         updateData.pickupRouteId = routeId;
       }
 
@@ -1079,8 +1048,7 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
         // Check if drop is already in a different route
         if (transportJob.dropRouteId && 
             transportJob.dropRouteId.toString() !== routeId.toString()) {
-          console.log(`⚠️  Warning: Transport job ${transportJob.jobNumber || jobId} drop stop is being moved from route ${transportJob.dropRouteId} to route ${routeId}`);
-        }
+          }
         updateData.dropRouteId = routeId;
       }
 
@@ -1094,8 +1062,6 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
         }
 
         await TransportJob.findByIdAndUpdate(jobId, updateData);
-        console.log(`✅ Updated transport job ${jobId} route references:`, updateData);
-
         // Also update the routeId in the vehicle's transportJobs array
         if (transportJob.vehicleId) {
           const vehicleId = transportJob.vehicleId._id || transportJob.vehicleId;
@@ -1118,8 +1084,7 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
               ]
             }
           );
-          console.log(`✅ Updated vehicle ${vehicleId} transportJobs history: routeId for transportJob ${jobId} -> ${routeId}`);
-        }
+          }
       }
     }
 
@@ -1191,7 +1156,6 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
         }
 
         await TransportJob.findByIdAndUpdate(jobId, updateData);
-        console.log(`✅ Cleared transport job ${jobId} route references for removed stops:`, updateData);
       }
     }
   } catch (error) {
@@ -1215,5 +1179,6 @@ module.exports = {
   updateStatusOnTransportJobRemoved,
   syncTransportJobToRouteStops,
   syncRouteStopToTransportJob,
-  updateTransportJobRouteReferences
+  updateTransportJobRouteReferences,
+  createMaintenanceExpenseForRoute
 };

@@ -5,6 +5,48 @@ const User = require('../models/User');
 class RouteTrackerService {
   constructor() {
     this.activeTrackers = new Map(); // Cache for active trackers
+    this.saveLocks = new Map(); // Locks to prevent parallel saves for the same route
+  }
+
+  /**
+   * Get or create a lock promise for a routeId
+   * This ensures only one save operation happens at a time per route
+   * Returns a function to release the lock
+   */
+  async acquireLock(routeId) {
+    // If there's already a lock, wait for it (with timeout to prevent deadlocks)
+    if (this.saveLocks.has(routeId)) {
+      try {
+        await Promise.race([
+          this.saveLocks.get(routeId),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Lock timeout')), 10000)
+          )
+        ]);
+      } catch (error) {
+        // If timeout, remove the lock and continue
+        if (error.message === 'Lock timeout') {
+          console.warn(`⚠️ Lock timeout for route ${routeId}, removing stale lock`);
+          this.saveLocks.delete(routeId);
+        } else {
+          throw error;
+        }
+      }
+    }
+    
+    // Create a new lock promise
+    let resolveLock;
+    const lockPromise = new Promise((resolve) => {
+      resolveLock = resolve;
+    });
+    
+    this.saveLocks.set(routeId, lockPromise);
+    
+    // Return a function to release the lock
+    return () => {
+      resolveLock();
+      this.saveLocks.delete(routeId);
+    };
   }
 
   /**
@@ -42,7 +84,6 @@ class RouteTrackerService {
       // Cache the active tracker
       this.activeTrackers.set(routeId, tracker);
 
-      console.log(`📍 Route tracking initialized for route ${routeId}`);
       return tracker;
     } catch (error) {
       console.error('Error initializing route tracking:', error);
@@ -59,21 +100,14 @@ class RouteTrackerService {
    * @param {string} auditLogId - Audit log ID (optional)
    */
   async addLocationEntry(routeId, latitude, longitude, accuracy = null, auditLogId = null) {
+    // Acquire lock to prevent parallel saves
+    const releaseLock = await this.acquireLock(routeId);
+    
     try {
-      console.log(`📍 addLocationEntry called for route ${routeId}:`, { latitude, longitude, accuracy });
-      
-      let tracker = this.activeTrackers.get(routeId);
+      // Check if tracker exists and is active
+      let tracker = await RouteTracking.findOne({ routeId, status: 'active' });
 
       if (!tracker) {
-        tracker = await RouteTracking.findOne({ routeId });
-        if (tracker) {
-          this.activeTrackers.set(routeId, tracker);
-          console.log(`📍 Found existing tracker for route ${routeId}, status: ${tracker.status}`);
-        }
-      }
-
-      if (!tracker || tracker.status !== 'active') {
-        console.log(`📍 Tracker not found or not active for route ${routeId}, attempting to initialize...`);
         // Try to initialize tracking if it doesn't exist
         // First try to find driver by currentRouteId
         let user = await User.findOne({ currentRouteId: routeId });
@@ -84,24 +118,21 @@ class RouteTrackerService {
           const route = await Route.findById(routeId).populate('driverId');
           if (route && route.driverId) {
             user = route.driverId;
-            console.log(`📍 Found driver from route: ${user._id}`);
           }
         }
         
         if (user && (user.role === 'ptgDriver' || user.role === 'ptgDriver')) {
-          console.log(`📍 Initializing tracking for route ${routeId} with driver ${user._id}`);
           tracker = await this.initializeTracking(routeId, user._id, null, auditLogId);
         } else {
-          console.log(`⚠️ Cannot initialize tracking - no driver found for route ${routeId}`);
           // Try to create tracker anyway with route info
           const Route = require('../models/Route');
           const route = await Route.findById(routeId);
           if (route && route.driverId) {
             const driverId = typeof route.driverId === 'object' ? route.driverId._id : route.driverId;
             const truckId = route.truckId ? (typeof route.truckId === 'object' ? route.truckId._id : route.truckId) : null;
-            console.log(`📍 Initializing tracking using route driver info: ${driverId}`);
             tracker = await this.initializeTracking(routeId, driverId, truckId, auditLogId);
           } else {
+            releaseLock();
             return null; // Cannot initialize without driver info
           }
         }
@@ -109,6 +140,7 @@ class RouteTrackerService {
 
       if (!tracker) {
         console.error(`❌ Tracker still not available after initialization attempt for route ${routeId}`);
+        releaseLock();
         return null;
       }
 
@@ -122,19 +154,28 @@ class RouteTrackerService {
         refType: auditLogId ? 'AuditLog' : undefined
       };
 
-      tracker.history.push(locationEntry);
-      const savedTracker = await tracker.save();
+      // Use atomic update with $push to avoid parallel save issues
+      // This is thread-safe and prevents ParallelSaveError
+      const updatedTracker = await RouteTracking.findByIdAndUpdate(
+        tracker._id,
+        {
+          $push: { history: locationEntry }
+        },
+        {
+          new: true, // Return updated document
+          runValidators: true
+        }
+      );
 
-      console.log(`✅ Added location entry to route ${routeId}:`, {
-        latitude: locationEntry.latitude,
-        longitude: locationEntry.longitude,
-        accuracy: locationEntry.accuracy,
-        timestamp: locationEntry.timestamp
-      });
-      console.log(`📍 Route tracker history length: ${savedTracker.history.length}`);
+      // Update cache if it exists
+      if (this.activeTrackers.has(routeId)) {
+        this.activeTrackers.set(routeId, updatedTracker);
+      }
 
+      releaseLock();
       return locationEntry;
     } catch (error) {
+      releaseLock();
       console.error('❌ Error adding location entry:', error);
       console.error('Error details:', {
         routeId,
@@ -157,15 +198,11 @@ class RouteTrackerService {
    * @param {Object} meta - Additional metadata
    */
   async addActionEntry(routeId, action, location = null, auditLogId = null, meta = {}) {
+    // Acquire lock to prevent parallel saves
+    const releaseLock = await this.acquireLock(routeId);
+    
     try {
-      let tracker = this.activeTrackers.get(routeId);
-
-      if (!tracker) {
-        tracker = await RouteTracking.findOne({ routeId });
-        if (tracker) {
-          this.activeTrackers.set(routeId, tracker);
-        }
-      }
+      let tracker = await RouteTracking.findOne({ routeId });
 
       if (!tracker || tracker.status !== 'active') {
         // Try to initialize tracking if it doesn't exist
@@ -173,8 +210,14 @@ class RouteTrackerService {
         if (user && user.role === 'ptgDriver') {
           tracker = await this.initializeTracking(routeId, user._id, null, auditLogId);
         } else {
+          releaseLock();
           return; // Cannot initialize without driver info
         }
+      }
+
+      if (!tracker) {
+        releaseLock();
+        return;
       }
 
       const actionEntry = {
@@ -200,11 +243,27 @@ class RouteTrackerService {
         }
       };
 
-      tracker.history.push(actionEntry);
-      await tracker.save();
+      // Use atomic update with $push to avoid parallel save issues
+      const updatedTracker = await RouteTracking.findByIdAndUpdate(
+        tracker._id,
+        {
+          $push: { history: actionEntry }
+        },
+        {
+          new: true,
+          runValidators: true
+        }
+      );
 
+      // Update cache if it exists
+      if (this.activeTrackers.has(routeId)) {
+        this.activeTrackers.set(routeId, updatedTracker);
+      }
+
+      releaseLock();
       return actionEntry;
     } catch (error) {
+      releaseLock();
       console.error('Error adding action entry:', error);
       throw error;
     }
@@ -246,7 +305,6 @@ class RouteTrackerService {
         // Remove from cache
         this.activeTrackers.delete(routeId);
 
-        console.log(`📍 Route tracking completed for route ${routeId}`);
         return tracker;
       }
     } catch (error) {

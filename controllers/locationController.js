@@ -202,10 +202,7 @@ exports.getDriverLocation = async (req, res) => {
   try {
     const { driverId } = req.params;
 
-    console.log('Driver ID:', driverId);
-
     const driver = await locationService.getDriverLocation(driverId);
-    console.log('Driver:', driver);
     if (!driver) {
       return res.status(404).json({
         success: false,
@@ -279,9 +276,6 @@ exports.updateRouteTracking = async (req, res) => {
   try {
     const { routeId } = req.params;
     const { latitude, longitude, accuracy, driverId } = req.body;
-
-    console.log(`📍 Received route tracking update for route ${routeId}:`, { latitude, longitude, accuracy, driverId });
-
     if (!latitude || !longitude) {
       return res.status(400).json({
         success: false,
@@ -294,7 +288,6 @@ exports.updateRouteTracking = async (req, res) => {
     const route = await Route.findById(routeId);
 
     if (!route) {
-      console.log(`📍 Route ${routeId} not found`);
       return res.status(404).json({
         success: false,
         message: 'Route not found'
@@ -303,7 +296,6 @@ exports.updateRouteTracking = async (req, res) => {
 
     // Check if route has a driver assigned
     if (!route.driverId) {
-      console.log(`📍 Route ${routeId} has no driver assigned`);
       return res.status(400).json({
         success: false,
         message: 'Route has no driver assigned'
@@ -326,7 +318,6 @@ exports.updateRouteTracking = async (req, res) => {
         accuracy
       );
 
-      console.log(`📍 Route tracking updated successfully for route ${routeId}:`, result ? 'Entry added' : 'No entry added');
     } catch (trackingError) {
       console.error('Error adding location to route tracking:', trackingError);
       // Don't fail the request if tracking fails

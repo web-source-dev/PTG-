@@ -366,17 +366,48 @@ exports.updateMyRoute = async (req, res) => {
       }
     }
 
-    // If updating stops, ensure sequence is maintained and validate
+    // If updating stops, ensure sequence is maintained, preserve transportJobId, and validate
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
+      const originalStops = route.stops || [];
+      
       updateData.stops.forEach((stop, index) => {
         if (stop.sequence === undefined) {
           stop.sequence = index + 1;
         }
+        
+        // Preserve transportJobId from original route for pickup/drop stops
+        // This is critical because transportJobId is required for pickup/drop stops
+        if ((stop.stopType === 'pickup' || stop.stopType === 'drop') && !stop.transportJobId) {
+          // Try to find the original stop by ID or sequence
+          const originalStop = originalStops.find(orig => {
+            const origId = orig._id ? orig._id.toString() : (orig.id ? orig.id.toString() : null);
+            const updatedId = stop._id ? stop._id.toString() : (stop.id ? stop.id.toString() : null);
+            
+            // Match by ID if available
+            if (origId && updatedId && origId === updatedId) {
+              return true;
+            }
+            
+            // Match by stopType and sequence as fallback
+            if (orig.stopType === stop.stopType && orig.sequence === stop.sequence) {
+              return true;
+            }
+            
+            return false;
+          });
+          
+          // Preserve transportJobId from original stop if found
+          if (originalStop && originalStop.transportJobId) {
+            // Extract ID if it's an object
+            if (typeof originalStop.transportJobId === 'object' && originalStop.transportJobId !== null) {
+              stop.transportJobId = originalStop.transportJobId._id || originalStop.transportJobId.id;
+            } else {
+              stop.transportJobId = originalStop.transportJobId;
+            }
+          }
+        }
       });
 
-      // Check if any stop was marked as completed, and if so, set the next pending stop to "In Progress"
-      // Compare with original route stops to detect changes
-      const originalStops = route.stops || [];
       const sortedOriginalStops = [...originalStops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
       const sortedUpdatedStops = [...updateData.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
 
@@ -711,15 +742,7 @@ exports.updateMyRoute = async (req, res) => {
     
     if (req.body.currentLocation && routeIsActive) {
       try {
-        const location = req.body.currentLocation;
-        console.log(`📍 Attempting to add location entry to route tracking for route ${routeId}:`, {
-          latitude: location.latitude,
-          longitude: location.longitude,
-          accuracy: location.accuracy,
-          routeStatus: updatedRoute?.status,
-          willBeInProgress: willBeInProgress
-        });
-        
+        const location = req.body.currentLocation;        
         await routeTracker.addLocationEntry(
           routeId,
           location.latitude,
@@ -727,20 +750,13 @@ exports.updateMyRoute = async (req, res) => {
           location.accuracy || null,
           null // No specific audit log for general location updates
         );
-        console.log(`✅ Successfully added location entry to route tracking for route ${routeId}`);
       } catch (locationError) {
         console.error('❌ Error adding location entry to route tracking:', locationError);
         // Don't fail the route update if location tracking fails
       }
     } else {
       if (req.body.currentLocation) {
-        console.log(`⚠️ Location provided but not added to tracking:`, {
-          hasLocation: !!req.body.currentLocation,
-          routeStatus: updatedRoute?.status,
-          routeExists: !!updatedRoute,
-          willBeInProgress: willBeInProgress,
-          routeIsActive: routeIsActive
-        });
+        console.log(`⚠️ Location provided but not added to tracking:`);
       }
     }
 

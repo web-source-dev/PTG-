@@ -51,11 +51,27 @@ const upload = multer({
  * @returns {Promise<object>} Cloudinary upload result
  */
 const uploadFromBase64 = async (base64String, folder = 'vos-ptg', options = {}) => {
+  const uploadId = `cloudinary_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const startTime = Date.now();
+  
   try {
+    console.log(`[${uploadId}] ☁️ Cloudinary upload started:`, {
+      folder,
+      base64Length: base64String.length,
+      hasOptions: !!options,
+      optionsContext: options.context || null
+    });
+
     // Remove data URL prefix if present
     const base64Data = base64String.includes(',') 
       ? base64String.split(',')[1] 
       : base64String;
+    
+    console.log(`[${uploadId}] 📊 Base64 processing:`, {
+      originalLength: base64String.length,
+      processedLength: base64Data.length,
+      hasDataPrefix: base64String.includes(',')
+    });
 
     // Detect file type from data URL or options
     const mimeType = base64String.includes(',') 
@@ -117,11 +133,35 @@ const uploadFromBase64 = async (base64String, folder = 'vos-ptg', options = {}) 
       ...options
     };
 
+    console.log(`[${uploadId}] ⚙️ Upload options:`, {
+      folder,
+      resourceType,
+      publicId: publicId || 'auto-generated',
+      hasTransformation: isImage,
+      optionsKeys: Object.keys(uploadOptions)
+    });
+
     const dataUrl = isPdf 
       ? `data:application/pdf;base64,${base64Data}`
       : `data:image/jpeg;base64,${base64Data}`;
 
+    console.log(`[${uploadId}] 🚀 Calling Cloudinary API...`, {
+      dataUrlLength: dataUrl.length,
+      dataUrlPreview: `${dataUrl.substring(0, 50)}...`
+    });
+
+    const cloudinaryCallStart = Date.now();
     const result = await cloudinary.uploader.upload(dataUrl, uploadOptions);
+    const cloudinaryCallDuration = Date.now() - cloudinaryCallStart;
+    
+    console.log(`[${uploadId}] ✅ Cloudinary API call successful:`, {
+      duration: `${cloudinaryCallDuration}ms`,
+      publicId: result.public_id,
+      url: result.secure_url,
+      bytes: result.bytes,
+      format: result.format,
+      resourceType: result.resource_type
+    });
 
     // For PDFs, ensure the URL includes the .pdf extension
     // Cloudinary sometimes strips extensions from raw file URLs, so we need to add it back
@@ -136,6 +176,14 @@ const uploadFromBase64 = async (base64String, folder = 'vos-ptg', options = {}) 
       }
     }
 
+    const totalDuration = Date.now() - startTime;
+    console.log(`[${uploadId}] ✅ Cloudinary upload completed:`, {
+      totalDuration: `${totalDuration}ms`,
+      finalUrl,
+      publicId: result.public_id,
+      fileSize: `${(result.bytes / 1024).toFixed(2)} KB`
+    });
+
     return {
       url: finalUrl,
       public_id: result.public_id,
@@ -146,7 +194,21 @@ const uploadFromBase64 = async (base64String, folder = 'vos-ptg', options = {}) 
       resource_type: result.resource_type
     };
   } catch (error) {
-    console.error('Cloudinary upload error:', error);
+    const totalDuration = Date.now() - startTime;
+    console.error(`[${uploadId}] ❌ Cloudinary upload error:`, {
+      duration: `${totalDuration}ms`,
+      error: error.message,
+      errorName: error.name,
+      errorCode: error.http_code || error.code,
+      errorStatus: error.status,
+      stack: error.stack,
+      errorDetails: error.error || null,
+      cloudinaryConfig: {
+        cloudName: process.env.CLOUDINARY_CLOUD_NAME ? 'SET' : 'MISSING',
+        apiKey: process.env.CLOUDINARY_API_KEY ? 'SET' : 'MISSING',
+        apiSecret: process.env.CLOUDINARY_API_SECRET ? 'SET' : 'MISSING'
+      }
+    });
     throw new Error(`Failed to upload file to Cloudinary: ${error.message}`);
   }
 };

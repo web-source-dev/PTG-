@@ -592,12 +592,47 @@ exports.updateRoute = async (req, res) => {
         });
       }
 
-      // Ensure sequence is set for all stops, initialize checklists, and populate formattedAddress
+      // Ensure sequence is set for all stops, preserve transportJobId, initialize checklists, and populate formattedAddress
       const { getDefaultChecklist } = require('../utils/checklistDefaults');
+      const originalStops = route.stops || [];
+      
       updateData.stops.forEach((stop, index) => {
         if (stop.sequence === undefined) {
           stop.sequence = index + 1;
         }
+        
+        // Preserve transportJobId from original route for pickup/drop stops
+        // This is critical because transportJobId is required for pickup/drop stops
+        if ((stop.stopType === 'pickup' || stop.stopType === 'drop') && !stop.transportJobId) {
+          // Try to find the original stop by ID or sequence
+          const originalStop = originalStops.find(orig => {
+            const origId = orig._id ? orig._id.toString() : (orig.id ? orig.id.toString() : null);
+            const updatedId = stop._id ? stop._id.toString() : (stop.id ? stop.id.toString() : null);
+            
+            // Match by ID if available
+            if (origId && updatedId && origId === updatedId) {
+              return true;
+            }
+            
+            // Match by stopType and sequence as fallback
+            if (orig.stopType === stop.stopType && orig.sequence === stop.sequence) {
+              return true;
+            }
+            
+            return false;
+          });
+          
+          // Preserve transportJobId from original stop if found
+          if (originalStop && originalStop.transportJobId) {
+            // Extract ID if it's an object
+            if (typeof originalStop.transportJobId === 'object' && originalStop.transportJobId !== null) {
+              stop.transportJobId = originalStop.transportJobId._id || originalStop.transportJobId.id;
+            } else {
+              stop.transportJobId = originalStop.transportJobId;
+            }
+          }
+        }
+        
         // Initialize checklist if not provided
         if (!stop.checklist || stop.checklist.length === 0) {
           stop.checklist = getDefaultChecklist(stop.stopType);
@@ -661,7 +696,6 @@ exports.updateRoute = async (req, res) => {
 
       // Check for stop status changes and update related statuses
       // Also handle automatic next stop activation when a stop is completed
-      const originalStops = route.stops || [];
       const sortedOriginalStops = [...originalStops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
       const sortedUpdatedStops = [...updateData.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
 
@@ -719,7 +753,6 @@ exports.updateRoute = async (req, res) => {
 
     // Sync route stop location changes to transport jobs AFTER saving the route
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
-      console.log(`🔄 Checking ${updateData.stops.length} stops for transport job sync`);
       const originalStops = route.stops || [];
 
       for (let index = 0; index < updateData.stops.length; index++) {
@@ -727,7 +760,6 @@ exports.updateRoute = async (req, res) => {
 
         // Check if this is a pickup or drop stop with transport job
         if (updatedStop && (updatedStop.stopType === 'pickup' || updatedStop.stopType === 'drop') && updatedStop.transportJobId) {
-          console.log(`🔍 Processing ${updatedStop.stopType} stop with transport job ${updatedStop.transportJobId}`);
 
           // Find original stop - try multiple ways to match
           let originalStop = null;
@@ -749,7 +781,6 @@ exports.updateRoute = async (req, res) => {
             !updatedStop.location ||
             JSON.stringify(originalStop.location) !== JSON.stringify(updatedStop.location);
 
-          console.log(`📍 Stop ${updatedStop._id || updatedStop.id || updatedStop.sequence}: hasLocationChanges=${hasLocationChanges}, originalStop=${!!originalStop}`);
 
           if (hasLocationChanges && updatedStop.location) {
             try {
@@ -803,7 +834,6 @@ exports.updateRoute = async (req, res) => {
 
               if (Object.keys(updateData).length > 0) {
                 await TransportJob.findByIdAndUpdate(jobId, updateData);
-                console.log(`✅ Synced location changes directly to transport job ${jobId}:`, updateData);
               }
             } catch (syncError) {
               console.error('Failed to sync route stop to transport job:', syncError);
@@ -972,22 +1002,11 @@ exports.updateRoute = async (req, res) => {
 
     // If stops were updated, recalculate distances and coordinates
     if (updateData.stops !== undefined && Array.isArray(updateData.stops)) {
-      console.log('🔄 Recalculating distances for updated route:', updatedRoute._id);
       try {
         const routeWithDistances = await locationService.calculateRouteDistances(updatedRoute);
 
         // Clean and validate the stops data before replacement
-        console.log('🔄 Preparing clean stops data for replacement');
         const cleanStops = routeWithDistances.stops.map((processedStop, index) => {
-          console.log(`📝 Stop ${index + 1} final data:`, {
-            id: processedStop._id,
-            hasLocation: !!processedStop.location,
-            hasCoordinates: !!(processedStop.location?.coordinates),
-            coordinates: processedStop.location?.coordinates,
-            distance: processedStop.distanceFromPrevious,
-            duration: processedStop.durationFromPrevious
-          });
-
           // Create a clean copy of the stop
           const cleanStop = { ...processedStop };
 
@@ -1004,7 +1023,6 @@ exports.updateRoute = async (req, res) => {
                   isNaN(cleanStop.location.coordinates.latitude) ||
                   isNaN(cleanStop.location.coordinates.longitude)))) {
               delete cleanStop.location.coordinates;
-              console.log(`🧹 Removed invalid coordinates from stop ${processedStop._id}`);
             }
           }
 
@@ -1019,7 +1037,6 @@ exports.updateRoute = async (req, res) => {
         updatedRoute.totalDuration = routeWithDistances.totalDuration;
 
         const savedRoute = await updatedRoute.save();
-        console.log('✅ Route updated with recalculated distances, saved ID:', savedRoute._id);
 
         // If route has transport jobs in stops, ensure they are updated to "Dispatched"
         // This ensures transport job statuses are set correctly after any route updates
@@ -1036,8 +1053,6 @@ exports.updateRoute = async (req, res) => {
 
         // Verify coordinates were saved
         const stopsWithCoords = savedRoute.stops.filter(s => s.location?.coordinates).length;
-        console.log(`🔍 Verification: ${stopsWithCoords}/${savedRoute.stops.length} stops have coordinates`);
-        console.log('📊 Final totals - Distance:', savedRoute.totalDistance, 'Duration:', savedRoute.totalDuration);
       } catch (locationError) {
         console.error('❌ Failed to recalculate route distances on update:', locationError.message);
         // Don't fail the update if distance calculation fails
@@ -1260,6 +1275,48 @@ exports.completeRouteStop = async (req, res) => {
       route.stops[stopIndex].actualTime = new Date();
     }
 
+    // Check if this stop was just marked as completed (status changed from non-Completed to Completed)
+    // If so, automatically set the next pending stop to "In Progress"
+    const wasJustCompleted = originalStatus !== 'Completed';
+    
+    if (wasJustCompleted && route.stops && route.stops.length > 0) {
+      // Sort stops by sequence
+      const sortedStops = [...route.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+      
+      // Find stops currently in progress (excluding the one we just completed)
+      const inProgressStops = sortedStops.filter(s => {
+        const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+        const completedStopId = route.stops[stopIndex]._id ? route.stops[stopIndex]._id.toString() : (route.stops[stopIndex].id ? route.stops[stopIndex].id.toString() : null);
+        return s.status === 'In Progress' && sId !== completedStopId;
+      });
+
+      // Only set next stop to "In Progress" if there's no stop currently in progress
+      if (inProgressStops.length === 0) {
+        // Find the next pending stop after the completed one
+        const nextPendingStop = sortedStops.find(s => {
+          const status = s.status;
+          const isPending = !status || status === 'Pending';
+          // Make sure it's not the stop we just completed
+          const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+          const completedStopId = route.stops[stopIndex]._id ? route.stops[stopIndex]._id.toString() : (route.stops[stopIndex].id ? route.stops[stopIndex].id.toString() : null);
+          return isPending && sId !== completedStopId;
+        });
+
+        if (nextPendingStop) {
+          // Find the index of the next pending stop in the original stops array
+          const nextPendingIndex = route.stops.findIndex(s => {
+            const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+            const pendingId = nextPendingStop._id ? nextPendingStop._id.toString() : (nextPendingStop.id ? nextPendingStop.id.toString() : null);
+            return sId && pendingId && sId === pendingId;
+          });
+
+          if (nextPendingIndex !== -1) {
+            route.stops[nextPendingIndex].status = 'In Progress';
+          }
+        }
+      }
+    }
+
     // Update lastUpdatedBy
     route.lastUpdatedBy = req.user ? req.user._id : undefined;
 
@@ -1277,9 +1334,7 @@ exports.completeRouteStop = async (req, res) => {
       
       if (!transportJobId) {
         console.warn(`⚠️ No transportJobId found for stop ${stopId} (type: ${stopType}) - skipping status update`);
-      } else {
-        console.log(`🔄 Updating statuses for stop completion: route=${routeId}, stopType=${stopType}, transportJobId=${transportJobId}`);
-        
+      } else {        
         await updateStatusOnStopUpdate(
           routeId,
           stopIndex,
@@ -1289,7 +1344,6 @@ exports.completeRouteStop = async (req, res) => {
           updatedRoute.stops // Pass the saved route stops
         );
         
-        console.log(`✅ Successfully updated statuses for stop completion: route=${routeId}, transportJobId=${transportJobId}`);
       }
     } catch (stopStatusError) {
       console.error('❌ Failed to update statuses on stop completion:', stopStatusError);
