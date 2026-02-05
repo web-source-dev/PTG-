@@ -38,5 +38,8 @@ router.put('/:id/stops/:stopId/manual-status-update', authorizeRoles('ptgAdmin',
 // POST /api/routes/:id/complete - Complete route (marks route and all pending/in-progress stops as completed)
 router.post('/:id/complete', authorizeRoles('ptgAdmin', 'ptgDispatcher', 'ptgDriver'), routeController.completeRoute);
 
+// POST /api/routes/:id/start - Start route (admin/dispatcher can start a route)
+router.post('/:id/start', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.startRoute);
+
 module.exports = router;
 

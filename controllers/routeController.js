@@ -8,7 +8,8 @@ const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
 const CalendarEvent = require('../models/CalendarEvent');
 const locationService = require('../utils/locationService');
-const { ROUTE_STATUS, ROUTE_STOP_STATUS, TRANSPORT_JOB_STATUS, VEHICLE_STATUS, TRUCK_STATUS } = require('../constants/status');
+const routeTracker = require('../utils/routeTracker');
+const { ROUTE_STATUS, ROUTE_STOP_STATUS, ROUTE_STATE, TRANSPORT_JOB_STATUS, VEHICLE_STATUS, TRUCK_STATUS } = require('../constants/status');
 const {
   updateStatusOnRouteCreate,
   updateStatusOnStopsSetup,
@@ -1940,6 +1941,190 @@ exports.completeRoute = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to complete route',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Start route - Admin/Dispatcher can start a route (same functionality as driver start route)
+ */
+exports.startRoute = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const { currentLocation } = req.body;
+
+    // Find the route
+    const route = await Route.findById(routeId);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    // Check if route is already in progress
+    if (route.status === ROUTE_STATUS.IN_PROGRESS) {
+      return res.status(400).json({
+        success: false,
+        message: 'Route is already in progress'
+      });
+    }
+
+    // Check if route is already completed or cancelled
+    if (route.status === ROUTE_STATUS.COMPLETED || route.status === ROUTE_STATUS.CANCELLED) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot start a route that is ${route.status.toLowerCase()}`
+      });
+    }
+
+    // Get driver ID
+    const driverId = typeof route.driverId === 'object' 
+      ? (route.driverId._id || route.driverId.id) 
+      : route.driverId;
+
+    if (!driverId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Route has no driver assigned'
+      });
+    }
+
+    // Check if driver already has an active route
+    const driver = await User.findById(driverId);
+    if (driver && driver.currentRouteId && driver.currentRouteId.toString() !== routeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Driver already has an active route. Please complete the current route before starting a new one.'
+      });
+    }
+
+    // Store old status for status change handler
+    const oldStatus = route.status;
+
+    // Update route status and state
+    route.status = ROUTE_STATUS.IN_PROGRESS;
+    route.state = ROUTE_STATE.STARTED;
+    route.actualStartDate = new Date();
+    route.lastUpdatedBy = req.user._id;
+
+    // Set current route in user model
+    await User.findByIdAndUpdate(driverId, {
+      currentRouteId: routeId
+    });
+
+    // Set truck status to "In Use" when route starts
+    if (route.truckId) {
+      const truckId = typeof route.truckId === 'object' 
+        ? (route.truckId._id || route.truckId.id) 
+        : route.truckId;
+      
+      await Truck.findByIdAndUpdate(truckId, {
+        status: TRUCK_STATUS.IN_USE,
+        currentDriver: driverId
+      });
+    }
+
+    // If route status is changing to "In Progress", automatically set first stop to "In Progress"
+    if (route.stops && route.stops.length > 0) {
+      // Sort stops by sequence
+      const sortedStops = [...route.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+      // Find first pending stop and set it to "In Progress"
+      const firstPendingStop = sortedStops.find(s => !s.status || s.status === ROUTE_STOP_STATUS.PENDING);
+      if (firstPendingStop) {
+        const stopIndex = route.stops.findIndex(s => {
+          const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+          const firstPendingId = firstPendingStop._id ? firstPendingStop._id.toString() : (firstPendingStop.id ? firstPendingStop.id.toString() : null);
+          return sId && firstPendingId && sId === firstPendingId;
+        });
+        
+        if (stopIndex !== -1) {
+          route.stops[stopIndex].status = ROUTE_STOP_STATUS.IN_PROGRESS;
+        }
+      }
+    }
+
+    // Save the route
+    await route.save();
+
+    // Log to audit log
+    const startAuditLog = await AuditLog.create({
+      action: 'start_route',
+      entityType: 'route',
+      entityId: routeId,
+      userId: req.user._id,
+      driverId: driverId,
+      location: currentLocation,
+      routeId,
+      notes: 'Started route (admin/dispatcher action)'
+    });
+
+    // Initialize route tracking
+    const truckId = route.truckId ? (typeof route.truckId === 'object' ? (route.truckId._id || route.truckId.id) : route.truckId) : null;
+    await routeTracker.initializeTracking(routeId, driverId, truckId, startAuditLog._id);
+    
+    // Add location entry for start action if location is provided
+    if (currentLocation) {
+      await routeTracker.addLocationEntry(
+        routeId,
+        currentLocation.latitude,
+        currentLocation.longitude,
+        currentLocation.accuracy,
+        startAuditLog._id
+      );
+    }
+
+    // Update all related statuses (transport jobs, vehicles) when route status changes
+    try {
+      await updateStatusOnRouteStatusChange(routeId, ROUTE_STATUS.IN_PROGRESS, oldStatus);
+    } catch (statusError) {
+      console.error('Failed to update statuses on route start:', statusError);
+      // Don't fail the route start if status updates fail
+    }
+
+    // Populate route for response
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'selectedTransportJobs',
+        select: 'jobNumber status vehicleId carrier carrierPayment',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+        }
+      })
+      .populate({
+        path: 'stops.transportJobId',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
+      });
+
+    res.status(200).json({
+      success: true,
+      message: 'Route started successfully',
+      data: {
+        route: populatedRoute
+      }
+    });
+  } catch (error) {
+    console.error('Error starting route:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to start route',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
