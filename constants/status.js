@@ -35,8 +35,7 @@ const TRANSPORT_JOB_STATUS = {
   DISPATCHED: 'Dispatched',
   IN_TRANSIT: 'In Transit',
   DELIVERED: 'Delivered',
-  CANCELLED: 'Cancelled',
-  EXCEPTION: 'Exception'
+  CANCELLED: 'Cancelled'
 };
 
 // Truck Status
@@ -49,9 +48,8 @@ const TRUCK_STATUS = {
 
 // Vehicle Status
 const VEHICLE_STATUS = {
-  PURCHASED_INTAKE_NEEDED: 'Purchased – Intake Needed',
   INTAKE_COMPLETE: 'Intake Completed',
-  READY_FOR_TRANSPORT: 'Ready for Transport',
+  READY_FOR_TRANSPORT: 'Ready for Transport', 
   IN_TRANSPORT: 'In Transport',
   DELIVERED: 'Delivered',
   CANCELLED: 'Cancelled'
@@ -113,8 +111,7 @@ const getAllStatusEnums = () => {
         [TRANSPORT_JOB_STATUS.DISPATCHED]: 'Dispatched',
         [TRANSPORT_JOB_STATUS.IN_TRANSIT]: 'In Transit',
         [TRANSPORT_JOB_STATUS.DELIVERED]: 'Delivered',
-        [TRANSPORT_JOB_STATUS.CANCELLED]: 'Cancelled',
-        [TRANSPORT_JOB_STATUS.EXCEPTION]: 'Exception'
+        [TRANSPORT_JOB_STATUS.CANCELLED]: 'Cancelled'
       }
     },
     truck: {
@@ -129,7 +126,6 @@ const getAllStatusEnums = () => {
     vehicle: {
       values: Object.values(VEHICLE_STATUS),
       labels: {
-        [VEHICLE_STATUS.PURCHASED_INTAKE_NEEDED]: 'Purchased – Intake Needed',
         [VEHICLE_STATUS.INTAKE_COMPLETE]: 'Intake Completed',
         [VEHICLE_STATUS.READY_FOR_TRANSPORT]: 'Ready for Transport',
         [VEHICLE_STATUS.IN_TRANSPORT]: 'In Transport',

@@ -26,8 +26,17 @@ router.delete('/:id', authorizeRoles('ptgAdmin'), routeController.deleteRoute);
 // POST /api/routes/:routeId/remove-transport-job - Remove transport job from route
 router.post('/:routeId/remove-transport-job', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.removeTransportJobFromRoute);
 
+// PUT /api/routes/:id/stops/:stopId - Update a stop (checklist, notes - NOT photos, NOT status)
+router.put('/:id/stops/:stopId', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.updateRouteStop);
+
 // POST /api/routes/:id/stops/:stopId/complete - Complete a specific stop
 router.post('/:id/stops/:stopId/complete', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.completeRouteStop);
+
+// POST /api/routes/:id/stops/:stopId/photos - Upload photos to a stop
+router.post('/:id/stops/:stopId/photos', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.uploadStopPhotos);
+
+// POST /api/routes/:id/stops/:stopId/photos/remove - Remove photo from a stop
+router.post('/:id/stops/:stopId/photos/remove', authorizeRoles('ptgAdmin', 'ptgDispatcher'), routeController.removeStopPhoto);
 
 // POST /api/routes/:id/stops/:stopId/not-delivered - Mark a stop as not delivered
 router.post('/:id/stops/:stopId/not-delivered', authorizeRoles('ptgAdmin', 'ptgDispatcher', 'ptgDriver'), routeController.markStopNotDelivered);

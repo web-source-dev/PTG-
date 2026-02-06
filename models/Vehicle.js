@@ -125,7 +125,7 @@ const vehicleSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: Object.values(VEHICLE_STATUS),
-    default: VEHICLE_STATUS.PURCHASED_INTAKE_NEEDED
+    default: VEHICLE_STATUS.INTAKE_COMPLETE
   },
 
   // Delivery tracking (deprecated - kept for backward compatibility)
@@ -165,8 +165,108 @@ const vehicleSchema = new mongoose.Schema({
     enum: ['Low', 'Normal', 'High', 'Urgent'],
     default: 'Normal'
   },
+
+  // Initial Pickup Location (set during vehicle intake)
+  initialPickupLocationName: {
+    type: String,
+    trim: true
+  },
+  initialPickupCity: {
+    type: String,
+    trim: true
+  },
+  initialPickupState: {
+    type: String,
+    trim: true
+  },
+  initialPickupZip: {
+    type: String,
+    trim: true
+  },
+  initialPickupFormattedAddress: {
+    type: String,
+    trim: true
+  },
+  initialPickupContactName: {
+    type: String,
+    trim: true
+  },
+  initialPickupContactPhone: {
+    type: String,
+    trim: true
+  },
+
+  // Initial Drop Location (set during vehicle intake)
+  initialDropDestinationType: {
+    type: String,
+    enum: ['PF', 'Auction', 'Other'],
+    default: 'Other'
+  },
+  initialDropLocationName: {
+    type: String,
+    trim: true
+  },
+  initialDropCity: {
+    type: String,
+    trim: true
+  },
+  initialDropState: {
+    type: String,
+    trim: true
+  },
+  initialDropZip: {
+    type: String,
+    trim: true
+  },
+  initialDropFormattedAddress: {
+    type: String,
+    trim: true
+  },
+  initialDropContactName: {
+    type: String,
+    trim: true
+  },
+  initialDropContactPhone: {
+    type: String,
+    trim: true
+  },
 }, {
   timestamps: true
+});
+
+// Pre-save middleware to populate formattedAddress fields
+vehicleSchema.pre('save', function(next) {
+  const locationService = require('../utils/locationService');
+  
+  // Populate initialPickupFormattedAddress if not already set
+  if (!this.initialPickupFormattedAddress && (this.initialPickupLocationName || this.initialPickupCity || this.initialPickupState)) {
+    const pickupLocation = {
+      name: this.initialPickupLocationName,
+      city: this.initialPickupCity,
+      state: this.initialPickupState,
+      zip: this.initialPickupZip
+    };
+    locationService.populateFormattedAddress(pickupLocation);
+    if (pickupLocation.formattedAddress) {
+      this.initialPickupFormattedAddress = pickupLocation.formattedAddress;
+    }
+  }
+
+  // Populate initialDropFormattedAddress if not already set
+  if (!this.initialDropFormattedAddress && (this.initialDropLocationName || this.initialDropCity || this.initialDropState)) {
+    const dropLocation = {
+      name: this.initialDropLocationName,
+      city: this.initialDropCity,
+      state: this.initialDropState,
+      zip: this.initialDropZip
+    };
+    locationService.populateFormattedAddress(dropLocation);
+    if (dropLocation.formattedAddress) {
+      this.initialDropFormattedAddress = dropLocation.formattedAddress;
+    }
+  }
+
+  next();
 });
 
 // Index for efficient queries

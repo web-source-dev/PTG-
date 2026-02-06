@@ -470,6 +470,28 @@ exports.getRouteById = async (req, res) => {
 
 /**
  * Update route
+ * 
+ * This endpoint is used ONLY for:
+ * 1. Route form updates (driver, truck, dates, journey locations, status)
+ * 2. Stops setup (which stops exist, their sequence, locations, scheduled dates/times)
+ * 
+ * This endpoint does NOT handle:
+ * - Stop status changes (use completeRouteStop endpoint)
+ * - Stop completion logic (use completeRouteStop endpoint)
+ * - Photo uploads (use uploadStopPhotos endpoint)
+ * - Stop notes/checklist updates from drivers (use updateMyRouteStop endpoint)
+ * 
+ * When updating stops, this endpoint preserves:
+ * - Stop status (from original stops)
+ * - Photos (from original stops)
+ * - actualDate, actualTime (from original stops)
+ * - Notes and checklist (from original stops)
+ * 
+ * Admin/dispatcher can only modify:
+ * - Stop existence (add/remove stops)
+ * - Stop sequence
+ * - Stop locations
+ * - Scheduled dates/times
  */
 exports.updateRoute = async (req, res) => {
   try {
@@ -592,7 +614,7 @@ exports.updateRoute = async (req, res) => {
         });
       }
 
-      // Ensure sequence is set for all stops, preserve transportJobId, initialize checklists, and populate formattedAddress
+      // Ensure sequence is set for all stops, preserve transportJobId and driver-managed fields, initialize checklists, and populate formattedAddress
       const { getDefaultChecklist } = require('../utils/checklistDefaults');
       const originalStops = route.stops || [];
       
@@ -601,42 +623,68 @@ exports.updateRoute = async (req, res) => {
           stop.sequence = index + 1;
         }
         
-        // Preserve transportJobId from original route for pickup/drop stops
-        // This is critical because transportJobId is required for pickup/drop stops
-        if ((stop.stopType === 'pickup' || stop.stopType === 'drop') && !stop.transportJobId) {
-          // Try to find the original stop by ID or sequence
-          const originalStop = originalStops.find(orig => {
-            const origId = orig._id ? orig._id.toString() : (orig.id ? orig.id.toString() : null);
-            const updatedId = stop._id ? stop._id.toString() : (stop.id ? stop.id.toString() : null);
-            
-            // Match by ID if available
-            if (origId && updatedId && origId === updatedId) {
-              return true;
-            }
-            
-            // Match by stopType and sequence as fallback
-            if (orig.stopType === stop.stopType && orig.sequence === stop.sequence) {
-              return true;
-            }
-            
-            return false;
-          });
+        // Find original stop by ID or sequence
+        const originalStop = originalStops.find(orig => {
+          const origId = orig._id ? orig._id.toString() : (orig.id ? orig.id.toString() : null);
+          const updatedId = stop._id ? stop._id.toString() : (stop.id ? stop.id.toString() : null);
           
-          // Preserve transportJobId from original stop if found
-          if (originalStop && originalStop.transportJobId) {
-            // Extract ID if it's an object
-            if (typeof originalStop.transportJobId === 'object' && originalStop.transportJobId !== null) {
-              stop.transportJobId = originalStop.transportJobId._id || originalStop.transportJobId.id;
-            } else {
-              stop.transportJobId = originalStop.transportJobId;
+          // Match by ID if available
+          if (origId && updatedId && origId === updatedId) {
+            return true;
+          }
+          
+          // Match by stopType and sequence as fallback
+          if (orig.stopType === stop.stopType && orig.sequence === stop.sequence) {
+            return true;
+          }
+          
+          return false;
+        });
+        
+        if (originalStop) {
+          // Preserve transportJobId from original route for pickup/drop stops
+          // This is critical because transportJobId is required for pickup/drop stops
+          if ((stop.stopType === 'pickup' || stop.stopType === 'drop') && !stop.transportJobId) {
+            if (originalStop.transportJobId) {
+              // Extract ID if it's an object
+              if (typeof originalStop.transportJobId === 'object' && originalStop.transportJobId !== null) {
+                stop.transportJobId = originalStop.transportJobId._id || originalStop.transportJobId.id;
+              } else {
+                stop.transportJobId = originalStop.transportJobId;
+              }
             }
+          }
+          
+          // Preserve driver-managed fields from original stop
+          // Admin/dispatcher only manages: stopType, sequence, location, scheduledDate, scheduledTimeStart, scheduledTimeEnd
+          if (originalStop.status) {
+            stop.status = originalStop.status;
+          }
+          if (originalStop.photos) {
+            stop.photos = originalStop.photos;
+          }
+          if (originalStop.actualDate) {
+            stop.actualDate = originalStop.actualDate;
+          }
+          if (originalStop.actualTime) {
+            stop.actualTime = originalStop.actualTime;
+          }
+          if (originalStop.notes) {
+            stop.notes = originalStop.notes;
+          }
+          if (originalStop.checklist) {
+            stop.checklist = originalStop.checklist;
+          }
+        } else {
+          // New stop - initialize defaults
+          if (!stop.status) {
+            stop.status = 'Pending';
+          }
+          if (!stop.checklist || stop.checklist.length === 0) {
+            stop.checklist = getDefaultChecklist(stop.stopType);
           }
         }
         
-        // Initialize checklist if not provided
-        if (!stop.checklist || stop.checklist.length === 0) {
-          stop.checklist = getDefaultChecklist(stop.stopType);
-        }
         // Populate formattedAddress for stop location
         if (stop.location) {
           locationService.populateFormattedAddress(stop.location);
@@ -691,54 +739,6 @@ exports.updateRoute = async (req, res) => {
         }
       }
 
-      // Note: Stops setup status update will be called AFTER route is saved
-      // This ensures we use the updated stops data
-
-      // Check for stop status changes and update related statuses
-      // Also handle automatic next stop activation when a stop is completed
-      const sortedOriginalStops = [...originalStops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
-      const sortedUpdatedStops = [...updateData.stops].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
-
-      // Find stops that were just marked as completed
-      const newlyCompletedStops = sortedUpdatedStops.filter(updatedStop => {
-        const updatedStatus = updatedStop.status;
-        if (updatedStatus !== 'Completed') return false;
-
-        // Find corresponding original stop
-        const originalStop = sortedOriginalStops.find(orig => {
-          const origId = orig._id ? orig._id.toString() : (orig.id ? orig.id.toString() : null);
-          const updatedId = updatedStop._id ? updatedStop._id.toString() : (updatedStop.id ? updatedStop.id.toString() : null);
-          return origId && updatedId && origId === updatedId;
-        });
-
-        // Check if status changed from non-Completed to Completed
-        return originalStop && originalStop.status !== 'Completed';
-      });
-
-      // If a stop was just completed, set the next pending stop to "In Progress"
-      if (newlyCompletedStops.length > 0) {
-        const inProgressStops = sortedUpdatedStops.filter(s => s.status === 'In Progress');
-
-        // Only set next stop to "In Progress" if there's no stop currently in progress
-        if (inProgressStops.length === 0) {
-          const nextPendingStop = sortedUpdatedStops.find(s => {
-            const status = s.status;
-            return !status || status === 'Pending';
-          });
-
-          if (nextPendingStop) {
-            const stopIndex = updateData.stops.findIndex(s => {
-              const stopId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
-              const pendingId = nextPendingStop._id ? nextPendingStop._id.toString() : (nextPendingStop.id ? nextPendingStop.id.toString() : null);
-              return stopId && pendingId && stopId === pendingId;
-            });
-
-            if (stopIndex !== -1) {
-              updateData.stops[stopIndex].status = 'In Progress';
-            }
-          }
-        }
-      }
     }
 
     // Update route
@@ -776,71 +776,179 @@ exports.updateRoute = async (req, res) => {
             originalStop = originalStops.find(s => s.sequence === updatedStop.sequence);
           }
 
+          // Check for location changes
           const hasLocationChanges = !originalStop ||
             !originalStop.location ||
             !updatedStop.location ||
             JSON.stringify(originalStop.location) !== JSON.stringify(updatedStop.location);
 
+          // Check for scheduled date/time changes
+          const originalScheduledDate = originalStop?.scheduledDate ? new Date(originalStop.scheduledDate).getTime() : null;
+          const updatedScheduledDate = updatedStop?.scheduledDate ? new Date(updatedStop.scheduledDate).getTime() : null;
+          const hasDateChanges = originalScheduledDate !== updatedScheduledDate;
 
-          if (hasLocationChanges && updatedStop.location) {
+          const originalTimeStart = originalStop?.scheduledTimeStart ? new Date(originalStop.scheduledTimeStart).getTime() : null;
+          const updatedTimeStart = updatedStop?.scheduledTimeStart ? new Date(updatedStop.scheduledTimeStart).getTime() : null;
+          const hasTimeStartChanges = originalTimeStart !== updatedTimeStart;
+
+          const originalTimeEnd = originalStop?.scheduledTimeEnd ? new Date(originalStop.scheduledTimeEnd).getTime() : null;
+          const updatedTimeEnd = updatedStop?.scheduledTimeEnd ? new Date(updatedStop.scheduledTimeEnd).getTime() : null;
+          const hasTimeEndChanges = originalTimeEnd !== updatedTimeEnd;
+
+          const hasScheduleChanges = hasDateChanges || hasTimeStartChanges || hasTimeEndChanges;
+
+          // Sync changes to transport job if location or schedule changed
+          if ((hasLocationChanges && updatedStop.location) || hasScheduleChanges) {
             try {
-              // Directly sync the location data to transport job
+              // Directly sync the location and schedule data to transport job
               const jobId = typeof updatedStop.transportJobId === 'object'
                 ? updatedStop.transportJobId._id || updatedStop.transportJobId.id
                 : updatedStop.transportJobId;
 
               const updateData = {};
+              
               if (updatedStop.stopType === 'pickup') {
-                updateData.pickupLocationName = updatedStop.location.name;
-                updateData.pickupCity = updatedStop.location.city;
-                updateData.pickupState = updatedStop.location.state;
-                updateData.pickupZip = updatedStop.location.zip;
-                // Populate formattedAddress if available from stop location, otherwise generate it
-                if (updatedStop.location.formattedAddress) {
-                  updateData.pickupFormattedAddress = updatedStop.location.formattedAddress;
-                } else {
-                  const pickupLocation = {
-                    name: updatedStop.location.name,
-                    city: updatedStop.location.city,
-                    state: updatedStop.location.state,
-                    zip: updatedStop.location.zip
-                  };
-                  locationService.populateFormattedAddress(pickupLocation);
-                  if (pickupLocation.formattedAddress) {
-                    updateData.pickupFormattedAddress = pickupLocation.formattedAddress;
+                // Sync location changes
+                if (hasLocationChanges && updatedStop.location) {
+                  updateData.pickupLocationName = updatedStop.location.name;
+                  updateData.pickupCity = updatedStop.location.city;
+                  updateData.pickupState = updatedStop.location.state;
+                  updateData.pickupZip = updatedStop.location.zip;
+                  // Populate formattedAddress if available from stop location, otherwise generate it
+                  if (updatedStop.location.formattedAddress) {
+                    updateData.pickupFormattedAddress = updatedStop.location.formattedAddress;
+                  } else {
+                    const pickupLocation = {
+                      name: updatedStop.location.name,
+                      city: updatedStop.location.city,
+                      state: updatedStop.location.state,
+                      zip: updatedStop.location.zip
+                    };
+                    locationService.populateFormattedAddress(pickupLocation);
+                    if (pickupLocation.formattedAddress) {
+                      updateData.pickupFormattedAddress = pickupLocation.formattedAddress;
+                    }
+                  }
+                }
+                
+                // Sync schedule changes
+                if (hasScheduleChanges) {
+                  // Handle date fields - use scheduledTimeStart/End if available, otherwise use scheduledDate
+                  if (updatedStop.scheduledTimeStart) {
+                    const timeStartDate = new Date(updatedStop.scheduledTimeStart);
+                    updateData.pickupDateStart = timeStartDate;
+                  } else if (updatedStop.scheduledDate) {
+                    updateData.pickupDateStart = new Date(updatedStop.scheduledDate);
+                  }
+                  
+                  if (updatedStop.scheduledTimeEnd) {
+                    const timeEndDate = new Date(updatedStop.scheduledTimeEnd);
+                    updateData.pickupDateEnd = timeEndDate;
+                  } else if (updatedStop.scheduledTimeStart) {
+                    // If only start time is set, use the same date for end
+                    const timeStartDate = new Date(updatedStop.scheduledTimeStart);
+                    updateData.pickupDateEnd = timeStartDate;
+                  } else if (updatedStop.scheduledDate) {
+                    updateData.pickupDateEnd = new Date(updatedStop.scheduledDate);
+                  }
+                  
+                  // Sync time strings (HH:MM format) - extract from scheduledTimeStart/End
+                  if (updatedStop.scheduledTimeStart) {
+                    const timeStartDate = new Date(updatedStop.scheduledTimeStart);
+                    const hours = timeStartDate.getHours().toString().padStart(2, '0');
+                    const minutes = timeStartDate.getMinutes().toString().padStart(2, '0');
+                    updateData.pickupTimeStart = `${hours}:${minutes}`;
+                  } else {
+                    // Clear time if scheduledTimeStart is removed
+                    updateData.pickupTimeStart = null;
+                  }
+                  
+                  if (updatedStop.scheduledTimeEnd) {
+                    const timeEndDate = new Date(updatedStop.scheduledTimeEnd);
+                    const hours = timeEndDate.getHours().toString().padStart(2, '0');
+                    const minutes = timeEndDate.getMinutes().toString().padStart(2, '0');
+                    updateData.pickupTimeEnd = `${hours}:${minutes}`;
+                  } else {
+                    // Clear time if scheduledTimeEnd is removed
+                    updateData.pickupTimeEnd = null;
                   }
                 }
               } else if (updatedStop.stopType === 'drop') {
-                updateData.dropLocationName = updatedStop.location.name;
-                updateData.dropCity = updatedStop.location.city;
-                updateData.dropState = updatedStop.location.state;
-                updateData.dropZip = updatedStop.location.zip;
-                // Populate formattedAddress if available from stop location, otherwise generate it
-                if (updatedStop.location.formattedAddress) {
-                  updateData.dropFormattedAddress = updatedStop.location.formattedAddress;
-                } else {
-                  const dropLocation = {
-                    name: updatedStop.location.name,
-                    city: updatedStop.location.city,
-                    state: updatedStop.location.state,
-                    zip: updatedStop.location.zip
-                  };
-                  locationService.populateFormattedAddress(dropLocation);
-                  if (dropLocation.formattedAddress) {
-                    updateData.dropFormattedAddress = dropLocation.formattedAddress;
+                // Sync location changes
+                if (hasLocationChanges && updatedStop.location) {
+                  updateData.dropLocationName = updatedStop.location.name;
+                  updateData.dropCity = updatedStop.location.city;
+                  updateData.dropState = updatedStop.location.state;
+                  updateData.dropZip = updatedStop.location.zip;
+                  // Populate formattedAddress if available from stop location, otherwise generate it
+                  if (updatedStop.location.formattedAddress) {
+                    updateData.dropFormattedAddress = updatedStop.location.formattedAddress;
+                  } else {
+                    const dropLocation = {
+                      name: updatedStop.location.name,
+                      city: updatedStop.location.city,
+                      state: updatedStop.location.state,
+                      zip: updatedStop.location.zip
+                    };
+                    locationService.populateFormattedAddress(dropLocation);
+                    if (dropLocation.formattedAddress) {
+                      updateData.dropFormattedAddress = dropLocation.formattedAddress;
+                    }
+                  }
+                }
+                
+                // Sync schedule changes
+                if (hasScheduleChanges) {
+                  // Handle date fields - use scheduledTimeStart/End if available, otherwise use scheduledDate
+                  if (updatedStop.scheduledTimeStart) {
+                    const timeStartDate = new Date(updatedStop.scheduledTimeStart);
+                    updateData.dropDateStart = timeStartDate;
+                  } else if (updatedStop.scheduledDate) {
+                    updateData.dropDateStart = new Date(updatedStop.scheduledDate);
+                  }
+                  
+                  if (updatedStop.scheduledTimeEnd) {
+                    const timeEndDate = new Date(updatedStop.scheduledTimeEnd);
+                    updateData.dropDateEnd = timeEndDate;
+                  } else if (updatedStop.scheduledTimeStart) {
+                    // If only start time is set, use the same date for end
+                    const timeStartDate = new Date(updatedStop.scheduledTimeStart);
+                    updateData.dropDateEnd = timeStartDate;
+                  } else if (updatedStop.scheduledDate) {
+                    updateData.dropDateEnd = new Date(updatedStop.scheduledDate);
+                  }
+                  
+                  // Sync time strings (HH:MM format) - extract from scheduledTimeStart/End
+                  if (updatedStop.scheduledTimeStart) {
+                    const timeStartDate = new Date(updatedStop.scheduledTimeStart);
+                    const hours = timeStartDate.getHours().toString().padStart(2, '0');
+                    const minutes = timeStartDate.getMinutes().toString().padStart(2, '0');
+                    updateData.dropTimeStart = `${hours}:${minutes}`;
+                  } else {
+                    // Clear time if scheduledTimeStart is removed
+                    updateData.dropTimeStart = null;
+                  }
+                  
+                  if (updatedStop.scheduledTimeEnd) {
+                    const timeEndDate = new Date(updatedStop.scheduledTimeEnd);
+                    const hours = timeEndDate.getHours().toString().padStart(2, '0');
+                    const minutes = timeEndDate.getMinutes().toString().padStart(2, '0');
+                    updateData.dropTimeEnd = `${hours}:${minutes}`;
+                  } else {
+                    // Clear time if scheduledTimeEnd is removed
+                    updateData.dropTimeEnd = null;
                   }
                 }
               }
 
               if (Object.keys(updateData).length > 0) {
                 await TransportJob.findByIdAndUpdate(jobId, updateData);
+                console.log(`✅ Synced ${updatedStop.stopType} stop changes to transport job ${jobId}`);
               }
             } catch (syncError) {
               console.error('Failed to sync route stop to transport job:', syncError);
               // Don't fail the route update if sync fails
             }
-          } else {
-            console.log(`ℹ️ No location changes detected for stop ${updatedStop._id || updatedStop.id || updatedStop.sequence}`);
           }
         }
       }
@@ -1325,6 +1433,25 @@ exports.completeRouteStop = async (req, res) => {
 
     // Reload route to get updated stops
     const updatedRoute = await Route.findById(routeId);
+    const updatedStop = updatedRoute.stops[stopIndex];
+
+    // Sync ALL vehicle photos from stop to transport job if this is a pickup/drop stop
+    if ((originalStop.stopType === 'pickup' || originalStop.stopType === 'drop') && originalStop.transportJobId) {
+      const jobId = getJobIdFromStop(originalStop.transportJobId);
+
+      if (jobId && updatedStop.photos && Array.isArray(updatedStop.photos)) {
+        // Get ALL vehicle photos from the stop
+        const vehiclePhotoUrls = updatedStop.photos
+          .filter(p => p.photoType === 'vehicle')
+          .map(p => p.url);
+
+        // Overwrite transport job photos with all vehicle photos from stop (ensures consistency)
+        const updateField = originalStop.stopType === 'pickup' ? 'pickupPhotos' : 'deliveryPhotos';
+        await TransportJob.findByIdAndUpdate(jobId, {
+          [updateField]: vehiclePhotoUrls // Overwrite with current photos
+        });
+      }
+    }
 
     // Update statuses based on stop completion (AFTER route is saved)
     // This ensures vehicle and transport job statuses are updated
@@ -1398,6 +1525,430 @@ exports.completeRouteStop = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to complete stop',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Update a stop's checklist and notes without completing it
+ * This endpoint allows admin/dispatcher to update stop data without changing status
+ */
+exports.updateRouteStop = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const stopId = req.params.stopId;
+    const { checklist, notes } = req.body;
+
+    // Find the route
+    const route = await Route.findById(routeId);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    // Find the stop
+    const stopIndex = route.stops.findIndex(s => {
+      const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+      const stopIdStr = stopId.toString();
+      if (sId && sId === stopIdStr) return true;
+      if (!sId && s.stopType && s.sequence) {
+        const fallbackId = `${s.stopType}-${s.sequence}`;
+        return fallbackId === stopIdStr;
+      }
+      return false;
+    });
+
+    if (stopIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stop not found'
+      });
+    }
+
+    // Update stop fields (only checklist and notes, NOT status, NOT photos)
+    if (checklist !== undefined) {
+      route.stops[stopIndex].checklist = checklist;
+    }
+    if (notes !== undefined) {
+      route.stops[stopIndex].notes = notes;
+    }
+
+    route.lastUpdatedBy = req.user ? req.user._id : undefined;
+    await route.save();
+
+    // Log stop update
+    try {
+      await AuditLog.create({
+        action: 'update_route',
+        entityType: 'route',
+        entityId: routeId,
+        userId: req.user ? req.user._id : undefined,
+        driverId: route.driverId,
+        routeId,
+        details: {
+          stopId: stopId,
+          stopType: route.stops[stopIndex].stopType,
+          updatedFields: {
+            checklist: checklist !== undefined,
+            notes: notes !== undefined
+          }
+        },
+        notes: `Updated ${route.stops[stopIndex].stopType} stop checklist/notes from route view`
+      });
+    } catch (auditError) {
+      console.error('Failed to create audit log for stop update:', auditError);
+    }
+
+    // Populate route for response
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'stops.transportJobId',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status'
+        }
+      })
+      .populate('createdBy', 'firstName lastName email')
+      .populate('lastUpdatedBy', 'firstName lastName email');
+
+    res.status(200).json({
+      success: true,
+      message: 'Stop updated successfully',
+      data: {
+        route: populatedRoute
+      }
+    });
+  } catch (error) {
+    console.error('Error updating stop:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update stop',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Upload photos to a specific stop - Admin/Dispatcher version
+ * Instantly saves photos and syncs to transport job
+ */
+exports.uploadStopPhotos = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const stopId = req.params.stopId;
+    const { photos, currentLocation } = req.body;
+
+    if (!photos || !Array.isArray(photos) || photos.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Photos array is required'
+      });
+    }
+
+    const route = await Route.findById(routeId);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    const stopIndex = route.stops.findIndex(s => {
+      const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+      const stopIdStr = stopId.toString();
+      if (sId && sId === stopIdStr) return true;
+      if (!sId && s.stopType && s.sequence) {
+        const fallbackId = `${s.stopType}-${s.sequence}`;
+        return fallbackId === stopIdStr;
+      }
+      return false;
+    });
+
+    if (stopIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stop not found'
+      });
+    }
+
+    const originalStop = route.stops[stopIndex];
+
+    // Add new photos to stop
+    const newPhotos = photos.map(photo => ({
+      url: photo.url,
+      timestamp: photo.timestamp || new Date(),
+      location: photo.location || currentLocation,
+      notes: photo.notes,
+      photoType: photo.photoType || 'stop',
+      photoCategory: photo.photoCategory
+    }));
+
+    route.stops[stopIndex].photos = [
+      ...(originalStop.photos || []),
+      ...newPhotos
+    ];
+    route.lastUpdatedBy = req.user ? req.user._id : undefined;
+    await route.save();
+
+    // Log photo uploads
+    const vehiclePhotos = newPhotos.filter(p => p.photoType === 'vehicle').length;
+    const stopPhotos = newPhotos.filter(p => p.photoType !== 'vehicle').length;
+
+    if (vehiclePhotos > 0) {
+      await AuditLog.create({
+        action: 'upload_vehicle_photo',
+        entityType: 'route',
+        entityId: routeId,
+        userId: req.user ? req.user._id : undefined,
+        driverId: route.driverId,
+        location: currentLocation,
+        routeId,
+        details: {
+          stopId: stopId,
+          stopType: originalStop.stopType,
+          photoCount: vehiclePhotos
+        },
+        notes: `Uploaded ${vehiclePhotos} vehicle photo(s) for ${originalStop.stopType} stop (admin/dispatcher)`
+      });
+    }
+
+    if (stopPhotos > 0) {
+      await AuditLog.create({
+        action: 'upload_stop_photo',
+        entityType: 'route',
+        entityId: routeId,
+        userId: req.user ? req.user._id : undefined,
+        driverId: route.driverId,
+        location: currentLocation,
+        routeId,
+        details: {
+          stopId: stopId,
+          stopType: originalStop.stopType,
+          photoCount: stopPhotos
+        },
+        notes: `Uploaded ${stopPhotos} stop photo(s) for ${originalStop.stopType} stop (admin/dispatcher)`
+      });
+    }
+
+    // Sync ALL vehicle photos from stop to transport job if this is a pickup/drop stop
+    // Reload route to get the updated stop with all photos
+    const updatedRoute = await Route.findById(routeId);
+    const updatedStop = updatedRoute.stops[stopIndex];
+    
+    if ((originalStop.stopType === 'pickup' || originalStop.stopType === 'drop') && originalStop.transportJobId) {
+      const jobId = typeof originalStop.transportJobId === 'object'
+        ? (originalStop.transportJobId._id || originalStop.transportJobId.id)
+        : originalStop.transportJobId;
+
+      if (jobId && updatedStop.photos && Array.isArray(updatedStop.photos)) {
+        // Get ALL vehicle photos from the stop (not just new ones)
+        const vehiclePhotoUrls = updatedStop.photos
+          .filter(p => p.photoType === 'vehicle')
+          .map(p => p.url);
+
+        // Overwrite transport job photos with all vehicle photos from stop (ensures consistency)
+        const updateField = originalStop.stopType === 'pickup' ? 'pickupPhotos' : 'deliveryPhotos';
+        await TransportJob.findByIdAndUpdate(jobId, {
+          [updateField]: vehiclePhotoUrls // Overwrite with current photos
+        });
+      }
+    }
+
+    // Populate and return route
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'selectedTransportJobs',
+        select: 'jobNumber status vehicleId carrier carrierPayment',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+        }
+      })
+      .populate({
+        path: 'stops.transportJobId',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
+      });
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully uploaded ${newPhotos.length} photo(s)`,
+      data: {
+        route: populatedRoute
+      }
+    });
+  } catch (error) {
+    console.error('Error uploading stop photos:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to upload photos',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Remove photo from a specific stop - Admin/Dispatcher version
+ */
+exports.removeStopPhoto = async (req, res) => {
+  try {
+    const routeId = req.params.id;
+    const stopId = req.params.stopId;
+    const { photoIndex } = req.body;
+
+    if (photoIndex === undefined || photoIndex === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'Photo index is required'
+      });
+    }
+
+    const route = await Route.findById(routeId);
+    if (!route) {
+      return res.status(404).json({
+        success: false,
+        message: 'Route not found'
+      });
+    }
+
+    const stopIndex = route.stops.findIndex(s => {
+      const sId = s._id ? s._id.toString() : (s.id ? s.id.toString() : null);
+      const stopIdStr = stopId.toString();
+      if (sId && sId === stopIdStr) return true;
+      if (!sId && s.stopType && s.sequence) {
+        const fallbackId = `${s.stopType}-${s.sequence}`;
+        return fallbackId === stopIdStr;
+      }
+      return false;
+    });
+
+    if (stopIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: 'Stop not found'
+      });
+    }
+
+    const originalStop = route.stops[stopIndex];
+    const photos = originalStop.photos || [];
+
+    if (photoIndex < 0 || photoIndex >= photos.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid photo index'
+      });
+    }
+
+    const removedPhoto = photos[photoIndex];
+    const isVehiclePhoto = removedPhoto.photoType === 'vehicle';
+
+    // Remove photo from stop
+    route.stops[stopIndex].photos = photos.filter((_, index) => index !== photoIndex);
+    route.lastUpdatedBy = req.user ? req.user._id : undefined;
+    await route.save();
+
+    // Log photo removal
+    await AuditLog.create({
+      action: isVehiclePhoto ? 'upload_vehicle_photo' : 'upload_stop_photo',
+      entityType: 'route',
+      entityId: routeId,
+      userId: req.user ? req.user._id : undefined,
+      driverId: route.driverId,
+      routeId,
+      details: {
+        stopId: stopId,
+        stopType: originalStop.stopType,
+        photoIndex: photoIndex,
+        photoUrl: removedPhoto.url
+      },
+      notes: `Removed ${isVehiclePhoto ? 'vehicle' : 'stop'} photo from ${originalStop.stopType} stop (admin/dispatcher)`
+    });
+
+    // Sync ALL vehicle photos from stop to transport job if this is a pickup/drop stop
+    // Reload route to get the updated stop with all photos after removal
+    const updatedRouteForRemoval = await Route.findById(routeId);
+    const updatedStopForRemoval = updatedRouteForRemoval.stops[stopIndex];
+    
+    if ((originalStop.stopType === 'pickup' || originalStop.stopType === 'drop') && originalStop.transportJobId) {
+      const jobId = typeof originalStop.transportJobId === 'object'
+        ? (originalStop.transportJobId._id || originalStop.transportJobId.id)
+        : originalStop.transportJobId;
+
+      if (jobId && updatedStopForRemoval.photos && Array.isArray(updatedStopForRemoval.photos)) {
+        // Get ALL vehicle photos from the stop after removal
+        const vehiclePhotoUrls = updatedStopForRemoval.photos
+          .filter(p => p.photoType === 'vehicle')
+          .map(p => p.url);
+
+        // Overwrite transport job photos with all vehicle photos from stop (ensures consistency)
+        const updateField = originalStop.stopType === 'pickup' ? 'pickupPhotos' : 'deliveryPhotos';
+        await TransportJob.findByIdAndUpdate(jobId, {
+          [updateField]: vehiclePhotoUrls // Overwrite with current photos
+        });
+      }
+    }
+
+    // Populate and return route
+    const populatedRoute = await Route.findById(routeId)
+      .populate('driverId', 'firstName lastName email phoneNumber')
+      .populate('truckId', 'truckNumber licensePlate make model year status')
+      .populate({
+        path: 'selectedTransportJobs',
+        select: 'jobNumber status vehicleId carrier carrierPayment',
+        populate: {
+          path: 'vehicleId',
+          select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+        }
+      })
+      .populate({
+        path: 'stops.transportJobId',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model status pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'pickupRouteId',
+            select: 'routeNumber status plannedStartDate'
+          },
+          {
+            path: 'dropRouteId',
+            select: 'routeNumber status plannedStartDate'
+          }
+        ]
+      });
+
+    res.status(200).json({
+      success: true,
+      message: 'Photo removed successfully',
+      data: {
+        route: populatedRoute
+      }
+    });
+  } catch (error) {
+    console.error('Error removing stop photo:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to remove photo',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

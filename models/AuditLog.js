@@ -10,7 +10,7 @@ const auditLogSchema = new mongoose.Schema({
       // Photo and file actions
       'upload_vehicle_photo', 'upload_stop_photo', 'upload_file', 'delete_file',
       // Checklist and report actions
-      'mark_stop_completed', 'complete_checklist_item', 'add_report',
+      'mark_stop_completed', 'complete_checklist_item', 'add_report', 'mark_stop_not_delivered',
       // Expense actions
       'add_fuel_expense', 'add_maintenance_expense', 'add_expense',
       // Transport job actions

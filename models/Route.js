@@ -275,6 +275,12 @@ const routeSchema = new mongoose.Schema({
       type: String,
       enum: Object.values(ROUTE_STOP_STATUS),
       default: ROUTE_STOP_STATUS.PENDING
+    },
+
+    // Stop Label (optional custom label for the stop)
+    label: {
+      type: String,
+      trim: true
     }
   }],
 

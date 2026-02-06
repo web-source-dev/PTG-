@@ -374,4 +374,3 @@ exports.deleteTransportJob = async (req, res) => {
     });
   }
 };
-

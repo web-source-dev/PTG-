@@ -22,7 +22,65 @@ exports.globalSearch = async (req, res) => {
 
     const searchTerm = searchQuery.trim();
     const searchLimit = parseInt(limit);
-    const searchRegex = new RegExp(searchTerm, 'i'); // Case-insensitive regex
+    // Create regex that matches with or without spaces, case-insensitive
+    // Replace spaces with '\s*' to match zero or more whitespace characters
+    const searchPattern = searchTerm.replace(/\s+/g, '\\s*');
+    const searchRegex = new RegExp(searchPattern, 'i'); // Case-insensitive regex
+
+    // First, find matching drivers, trucks, and routes to search expenses by reference
+    const [matchingDrivers, matchingTrucks, matchingRoutes] = await Promise.all([
+      User.find({
+        role: { $in: ['ptgDriver', 'ptgDispatcher', 'ptgAdmin'] },
+        $or: [
+          { email: searchRegex },
+          { firstName: searchRegex },
+          { lastName: searchRegex }
+        ]
+      }).select('_id').limit(50),
+      Truck.find({
+        $or: [
+          { truckNumber: searchRegex },
+          { licensePlate: searchRegex }
+        ]
+      }).select('_id').limit(50),
+      Route.find({
+        routeNumber: searchRegex
+      }).select('_id').limit(50)
+    ]);
+
+    const matchingDriverIds = matchingDrivers.map(d => d._id);
+    const matchingTruckIds = matchingTrucks.map(t => t._id);
+    const matchingRouteIds = matchingRoutes.map(r => r._id);
+
+    // Build expense search query
+    const expenseSearchQuery = {
+      $or: [
+        { type: searchRegex },
+        { description: searchRegex },
+        { 'askedLocation.formattedAddress': searchRegex },
+        { 'askedLocation.name': searchRegex },
+        { 'askedLocation.city': searchRegex },
+        { 'askedLocation.state': searchRegex },
+        { 'serviceProvider.name': searchRegex }
+      ]
+    };
+
+    // Add searches by related entities if we found matches
+    if (matchingDriverIds.length > 0 || matchingTruckIds.length > 0 || matchingRouteIds.length > 0) {
+      const relatedEntityConditions = [];
+      if (matchingDriverIds.length > 0) {
+        relatedEntityConditions.push({ driverId: { $in: matchingDriverIds } });
+      }
+      if (matchingTruckIds.length > 0) {
+        relatedEntityConditions.push({ truckId: { $in: matchingTruckIds } });
+      }
+      if (matchingRouteIds.length > 0) {
+        relatedEntityConditions.push({ routeId: { $in: matchingRouteIds } });
+      }
+      if (relatedEntityConditions.length > 0) {
+        expenseSearchQuery.$or.push(...relatedEntityConditions);
+      }
+    }
 
     // Search across all entities in parallel for better performance
     const searchPromises = [
@@ -95,13 +153,9 @@ exports.globalSearch = async (req, res) => {
       .limit(searchLimit)
       .sort({ createdAt: -1 }),
 
-      // Expenses
-      Expense.find({
-        $or: [
-          // Note: Expenses don't have direct text fields to search, but we can search by type
-        ]
-      })
-      .select('type totalCost createdAt')
+      // Expenses - Search by type, description, location, or related entities
+      Expense.find(expenseSearchQuery)
+      .select('type totalCost description createdAt driverId truckId routeId askedLocation serviceProvider')
       .populate('driverId', 'firstName lastName email')
       .populate('truckId', 'truckNumber')
       .populate('routeId', 'routeNumber')
@@ -204,18 +258,20 @@ exports.globalSearch = async (req, res) => {
         url: `/users/${user._id}`,
         createdAt: user.createdAt
       })),
-      expenses: expenses.filter(expense => expense.totalCost > 0).map(expense => ({
+      expenses: expenses.map(expense => ({
         _id: expense._id,
         type: 'expense',
         title: `${expense.type.charAt(0).toUpperCase() + expense.type.slice(1)} Expense`,
-        subtitle: `$${expense.totalCost} • ${expense.driverId ? `${expense.driverId.firstName} ${expense.driverId.lastName}` : 'Unknown driver'}`,
+        subtitle: `$${expense.totalCost?.toFixed(2) || '0.00'} • ${expense.driverId ? `${expense.driverId.firstName} ${expense.driverId.lastName}` : 'Unknown driver'}${expense.routeId ? ` • ${expense.routeId.routeNumber || 'Route'}` : ''}`,
         status: expense.type,
         details: {
           type: expense.type,
           totalCost: expense.totalCost,
+          description: expense.description,
           driver: expense.driverId,
           truck: expense.truckId,
-          route: expense.routeId
+          route: expense.routeId,
+          location: expense.askedLocation
         },
         url: `/expenses/${expense._id}`,
         createdAt: expense.createdAt
@@ -263,7 +319,9 @@ exports.advancedSearch = async (req, res) => {
     // Base search query
     if (searchQuery && searchQuery.trim().length >= 2) {
       const searchTerm = searchQuery.trim();
-      const searchRegex = new RegExp(searchTerm, 'i');
+      // Create regex that matches with or without spaces, case-insensitive
+      const searchPattern = searchTerm.replace(/\s+/g, '\\s*');
+      const searchRegex = new RegExp(searchPattern, 'i');
 
       // Build search query based on type
       switch (type) {
@@ -274,7 +332,7 @@ exports.advancedSearch = async (req, res) => {
               { make: searchRegex },
               { model: searchRegex },
               { shipperName: searchRegex },
-          { shipperCompany: searchRegex }
+              { shipperCompany: searchRegex }
             ]
           };
           if (status) query.status = status;
@@ -323,7 +381,17 @@ exports.advancedSearch = async (req, res) => {
           break;
 
         case 'expense':
-          query = {};
+          query = {
+            $or: [
+              { type: searchRegex },
+              { description: searchRegex },
+              { 'askedLocation.formattedAddress': searchRegex },
+              { 'askedLocation.name': searchRegex },
+              { 'askedLocation.city': searchRegex },
+              { 'askedLocation.state': searchRegex },
+              { 'serviceProvider.name': searchRegex }
+            ]
+          };
           if (status) query.type = status; // status maps to type for expenses
           break;
 

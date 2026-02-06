@@ -207,8 +207,7 @@ const mapTransportJobStatusToVehicleHistoryStatus = (transportJobStatus) => {
     [TRANSPORT_JOB_STATUS.DISPATCHED]: 'pending',
     [TRANSPORT_JOB_STATUS.IN_TRANSIT]: 'in_progress',
     [TRANSPORT_JOB_STATUS.DELIVERED]: 'completed',
-    [TRANSPORT_JOB_STATUS.CANCELLED]: 'cancelled',
-    [TRANSPORT_JOB_STATUS.EXCEPTION]: 'in_progress'
+    [TRANSPORT_JOB_STATUS.CANCELLED]: 'cancelled'
   };
   return statusMap[transportJobStatus] || 'pending';
 };
@@ -337,20 +336,74 @@ const updateStatusOnStopsSetup = async (routeId, stops = null) => {
       });
     }
 
-    // Update transport jobs status to "Dispatched" and vehicles to "Ready for Transport"
+    // Update transport jobs and vehicles statuses intelligently
+    // Only update if status can be upgraded, not downgraded
+    // This prevents downgrading statuses when adding drop stops to a new route after pickup is completed
     for (const jobId of transportJobIds) {
+      // Get current transport job status
+      const job = await TransportJob.findById(jobId).populate('vehicleId');
+      if (!job) continue;
+
+      // Check what stop types are being added in THIS route for this job
+      const stopsForThisJob = stopsToProcess.filter(stop => {
+        const stopJobId = typeof stop.transportJobId === 'object' 
+          ? (stop.transportJobId._id || stop.transportJobId.id) 
+          : stop.transportJobId;
+        return stopJobId && stopJobId.toString() === jobId.toString();
+      });
+
+      const hasPickupStop = stopsForThisJob.some(s => s.stopType === 'pickup');
+      const hasDropStop = stopsForThisJob.some(s => s.stopType === 'drop');
+
+      // Only update transport job status if it can be upgraded
+      // Don't downgrade from "In Transit" or "Delivered" back to "Dispatched"
+      if (job.status === TRANSPORT_JOB_STATUS.NEEDS_DISPATCH) {
+        // Only update to "Dispatched" if job is still "Needs Dispatch"
+        // This handles the case where a new job is being added to a route
         await TransportJob.findByIdAndUpdate(jobId, {
           status: TRANSPORT_JOB_STATUS.DISPATCHED
         });
+      } else if (job.status === TRANSPORT_JOB_STATUS.DISPATCHED && hasPickupStop) {
+        // If job is "Dispatched" and we're adding a pickup stop, keep it as "Dispatched"
+        // Status will be updated to "In Transit" when pickup is completed
+        // No change needed here
+      } else if (job.status === TRANSPORT_JOB_STATUS.IN_TRANSIT) {
+        // If job is "In Transit" (pickup completed), don't downgrade it
+        // This handles the case where drop stop is being added to a new route
+        // Status will be updated to "Delivered" when drop is completed
+        // No change needed here - preserve "In Transit" status
+      }
+      // For all other statuses (Delivered, Cancelled, Exception), don't change
 
-        // Get transport job to find vehicle
-        const job = await TransportJob.findById(jobId).populate('vehicleId');
-        if (job && job.vehicleId) {
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: VEHICLE_STATUS.READY_FOR_TRANSPORT
-          });
+      // Update vehicle status intelligently
+      if (job.vehicleId) {
+        const vehicleId = job.vehicleId._id || job.vehicleId;
+        const vehicle = await Vehicle.findById(vehicleId);
+        
+        if (vehicle) {
+          // Only update vehicle status if it can be upgraded
+          // Don't downgrade from "In Transport" or "Delivered" back to "Ready for Transport"
+          if (vehicle.status === VEHICLE_STATUS.READY_FOR_TRANSPORT) {
+            // If vehicle is "Ready for Transport" and we're adding stops, keep it as "Ready for Transport"
+            // Status will be updated to "In Transport" when pickup is completed
+            // No change needed here
+          } else if (vehicle.status === VEHICLE_STATUS.IN_TRANSPORT) {
+            // If vehicle is "In Transport" (pickup completed), don't downgrade it
+            // This handles the case where drop stop is being added to a new route
+            // Status will be updated to "Delivered" when drop is completed
+            // No change needed here - preserve "In Transport" status
+          } else if (vehicle.status === VEHICLE_STATUS.INTAKE_COMPLETE) {
+            // If vehicle is in early stages and we're adding stops, update to "Ready for Transport"
+            if (hasPickupStop || hasDropStop) {
+              await Vehicle.findByIdAndUpdate(vehicleId, {
+                status: VEHICLE_STATUS.READY_FOR_TRANSPORT
+              });
+            }
+          }
+          // For "Delivered" or "Cancelled" statuses, don't change
         }
       }
+    }
 
     // Only set route status to "Planned" if it hasn't been started yet
     // Do NOT change status if route is already "In Progress" or completed
