@@ -336,7 +336,7 @@ exports.getAllRoutes = async (req, res) => {
     const { page = 1, limit = 50, status, driverId, truckId, search, startDate, endDate } = req.query;
 
     // Build query
-    let query = {};
+    let query = { deleted: { $ne: true } }; // Exclude deleted routes
 
     if (status) {
       // Handle both single status, comma-separated string, and array of statuses
@@ -2599,10 +2599,20 @@ exports.startRoute = async (req, res) => {
     // Check if driver already has an active route
     const driver = await User.findById(driverId);
     if (driver && driver.currentRouteId && driver.currentRouteId.toString() !== routeId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Driver already has an active route. Please complete the current route before starting a new one.'
-      });
+      // Check if the current route is completed - if so, clear it and allow starting new route
+      const currentRoute = await Route.findById(driver.currentRouteId);
+      if (currentRoute && currentRoute.status === ROUTE_STATUS.COMPLETED) {
+        // Clear the completed route from driver's currentRouteId
+        await User.findByIdAndUpdate(driverId, {
+          $unset: { currentRouteId: 1 }
+        });
+      } else {
+        // Current route is still active (not completed), so prevent starting new route
+        return res.status(400).json({
+          success: false,
+          message: 'Driver already has an active route. Please complete the current route before starting a new one.'
+        });
+      }
     }
 
     // Store old status for status change handler
@@ -2748,37 +2758,128 @@ exports.deleteRoute = async (req, res) => {
       });
     }
 
-    // Remove route reference from all transport jobs in selectedTransportJobs
+    const { calculateVehicleStatusFromJobs, updateStatusOnTransportJobRemoved } = require('../utils/statusManager');
+    const { VEHICLE_STATUS } = require('../constants/status');
+
+    // Collect all transport jobs affected by this route deletion
+    const transportJobIds = new Set();
+    
     if (route.selectedTransportJobs && Array.isArray(route.selectedTransportJobs)) {
-      for (const jobId of route.selectedTransportJobs) {
-        await TransportJob.findByIdAndUpdate(jobId, {
-        $unset: { routeId: 1 }
+      route.selectedTransportJobs.forEach(jobId => {
+        transportJobIds.add(jobId.toString());
       });
-      }
     }
 
-    // Also remove route reference from transport jobs in stops
     if (route.stops && Array.isArray(route.stops)) {
-      const jobIds = new Set();
       route.stops.forEach(stop => {
         if (stop.transportJobId) {
-          jobIds.add(getJobIdFromStop(stop.transportJobId));
+          transportJobIds.add(getJobIdFromStop(stop.transportJobId));
         }
       });
-      for (const jobId of jobIds) {
-        await TransportJob.findByIdAndUpdate(jobId, {
-          $unset: { routeId: 1 }
-        });
+    }
+
+    // Build effects message for confirmation
+    const effects = [];
+    if (transportJobIds.size > 0) {
+      effects.push(`This route contains ${transportJobIds.size} transport job(s). Their statuses will be updated.`);
+      
+      // Check affected vehicles
+      const affectedVehicles = new Set();
+      for (const jobId of transportJobIds) {
+        const job = await TransportJob.findById(jobId).select('vehicleId');
+        if (job && job.vehicleId) {
+          const vehicleId = typeof job.vehicleId === 'object' ? (job.vehicleId._id || job.vehicleId.id) : job.vehicleId;
+          affectedVehicles.add(vehicleId.toString());
+        }
+      }
+      if (affectedVehicles.size > 0) {
+        effects.push(`Vehicle statuses for ${affectedVehicles.size} vehicle(s) will be recalculated.`);
       }
     }
 
-    // Update truck status
+    // Check if confirmation is required (if there are effects)
+    if (effects.length > 0 && (!req.body || !req.body.confirm)) {
+      return res.status(400).json({
+        success: false,
+        requiresConfirmation: true,
+        message: 'Deleting this route will have the following effects:',
+        effects: effects,
+        confirmationMessage: 'Please confirm deletion by including { "confirm": true } in the request body.'
+      });
+    }
+
+    // Update transport job statuses and remove route references (only for non-deleted jobs)
+    for (const jobId of transportJobIds) {
+      try {
+        const job = await TransportJob.findById(jobId);
+        if (!job || job.deleted) continue; // Skip deleted jobs
+
+        // Remove route references
+        await TransportJob.findByIdAndUpdate(jobId, {
+          $unset: { 
+            routeId: 1,
+            pickupRouteId: 1,
+            dropRouteId: 1
+          }
+        });
+
+        // Update transport job status (revert to "Needs Dispatch" if not delivered/cancelled)
+        if (job.status !== TRANSPORT_JOB_STATUS.DELIVERED && 
+            job.status !== TRANSPORT_JOB_STATUS.CANCELLED) {
+          await TransportJob.findByIdAndUpdate(jobId, {
+            status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH,
+            $unset: { assignedDriver: 1 }
+          });
+        }
+
+        // Update vehicle status based on remaining transport jobs (only if vehicle is not deleted)
+        if (job.vehicleId) {
+          const vehicleId = typeof job.vehicleId === 'object' 
+            ? (job.vehicleId._id || job.vehicleId.id) 
+            : job.vehicleId;
+          
+          const vehicle = await Vehicle.findById(vehicleId);
+          if (vehicle && !vehicle.deleted) {
+            // Recalculate vehicle status based on all remaining non-deleted transport jobs
+            const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
+            await Vehicle.findByIdAndUpdate(vehicleId, {
+              status: newVehicleStatus
+            });
+          }
+        }
+      } catch (jobError) {
+        console.error(`Error updating transport job ${jobId} on route deletion:`, jobError);
+        // Continue with other jobs even if one fails
+      }
+    }
+
+    // Update truck status to Available if this route is assigned to it
     if (route.truckId) {
-      const truck = await Truck.findById(route.truckId);
+      const truckId = typeof route.truckId === 'object'
+        ? (route.truckId._id || route.truckId.id)
+        : route.truckId;
+      
+      const truck = await Truck.findById(truckId);
       if (truck) {
-        truck.status = 'Available';
+        // Set truck status to Available when route is deleted
+        truck.status = TRUCK_STATUS.AVAILABLE;
         truck.currentDriver = undefined;
         await truck.save();
+      }
+    }
+
+    // Remove currentRouteId from driver profile if this route is their current route
+    if (route.driverId) {
+      const driverId = typeof route.driverId === 'object'
+        ? (route.driverId._id || route.driverId.id)
+        : route.driverId;
+      
+      const driver = await User.findById(driverId);
+      if (driver && driver.currentRouteId && driver.currentRouteId.toString() === req.params.id.toString()) {
+        // Remove currentRouteId from driver if it matches the deleted route
+        await User.findByIdAndUpdate(driverId, {
+          $unset: { currentRouteId: 1 }
+        });
       }
     }
 
@@ -2793,12 +2894,14 @@ exports.deleteRoute = async (req, res) => {
         routeNumber: route.routeNumber,
         driverId: route.driverId,
         truckId: route.truckId,
-        status: route.status
+        status: route.status,
+        transportJobsAffected: transportJobIds.size,
+        effects: effects
       },
-      notes: `Deleted route ${route.routeNumber || req.params.id}`
+      notes: `Soft deleted route ${route.routeNumber || req.params.id}. ${effects.join(' ')}`
     });
 
-    // Cancel or delete associated calendar event
+    // Cancel associated calendar event
     try {
       const calendarEvent = await CalendarEvent.findOne({ routeId: route._id });
       if (calendarEvent) {
@@ -2817,7 +2920,7 @@ exports.deleteRoute = async (req, res) => {
           details: {
             status: 'cancelled'
           },
-          notes: `Auto-cancelled calendar event for deleted route ${route.routeNumber || req.params.id}`
+          notes: `Auto-cancelled calendar event for soft deleted route ${route.routeNumber || req.params.id}`
         });
       }
     } catch (calendarError) {
@@ -2825,12 +2928,17 @@ exports.deleteRoute = async (req, res) => {
       // Don't fail route deletion if calendar event update fails
     }
 
-    // Delete route
-    await Route.findByIdAndDelete(req.params.id);
+    // Soft delete the route (mark as deleted instead of actually deleting)
+    const deletionTime = new Date();
+    await Route.findByIdAndUpdate(req.params.id, {
+      deleted: true,
+      deletedAt: deletionTime
+    });
 
     res.status(200).json({
       success: true,
-      message: 'Route deleted successfully'
+      message: 'Route deleted successfully. Data preserved for reference.',
+      effects: effects
     });
   } catch (error) {
     console.error('Error deleting route:', error);

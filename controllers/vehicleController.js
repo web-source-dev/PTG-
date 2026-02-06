@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Vehicle = require('../models/Vehicle');
 const TransportJob = require('../models/TransportJob');
 const AuditLog = require('../models/AuditLog');
+const Shipper = require('../models/Shipper');
 const { updateVehicleOnCreate } = require('../utils/statusManager');
 const { calculateVehicleDistance, calculateVehiclesDistances } = require('../utils/vehicleDistanceService');
 
@@ -21,6 +22,55 @@ exports.createVehicle = async (req, res) => {
     } else {
       vehicleData.createdBy = req.user ? req.user._id : null;
       vehicleData.source = vehicleData.source || 'PTG'; // PTG frontend/authenticated users, but allow override
+    }
+
+    // Auto-create or find shipper if shipper details are provided
+    if (vehicleData.shipperName && vehicleData.shipperCompany && !vehicleData.shipperId) {
+      try {
+        let shipper = null;
+        if (vehicleData.shipperEmail) {
+          shipper = await Shipper.findOne({
+            shipperCompany: vehicleData.shipperCompany.trim(),
+            shipperEmail: vehicleData.shipperEmail.toLowerCase().trim()
+          });
+        } else {
+          shipper = await Shipper.findOne({
+            shipperCompany: vehicleData.shipperCompany.trim(),
+            shipperName: vehicleData.shipperName.trim()
+          });
+        }
+
+        if (!shipper) {
+          // Create new shipper
+          shipper = await Shipper.create({
+            shipperName: vehicleData.shipperName.trim(),
+            shipperCompany: vehicleData.shipperCompany.trim(),
+            shipperEmail: vehicleData.shipperEmail ? vehicleData.shipperEmail.toLowerCase().trim() : undefined,
+            shipperPhone: vehicleData.shipperPhone ? vehicleData.shipperPhone.trim() : undefined,
+            createdBy: req.user?._id,
+            lastUpdatedBy: req.user?._id
+          });
+
+          // Log shipper creation
+          await AuditLog.create({
+            action: 'create_shipper',
+            entityType: 'shipper',
+            entityId: shipper._id,
+            userId: req.user?._id,
+            details: {
+              shipperName: shipper.shipperName,
+              shipperCompany: shipper.shipperCompany,
+              shipperEmail: shipper.shipperEmail
+            },
+            notes: `Auto-created shipper ${shipper.shipperCompany} from vehicle creation`
+          });
+        }
+
+        vehicleData.shipperId = shipper._id;
+      } catch (shipperError) {
+        console.error('Error creating/finding shipper:', shipperError);
+        // Continue with vehicle creation even if shipper creation fails
+      }
     }
 
     // Create vehicle
@@ -76,7 +126,7 @@ exports.getAllVehicles = async (req, res) => {
     const { page = 1, limit = 50, status, search, startDate, endDate } = req.query;
 
     // Build query
-    let query = {};
+    let query = { deleted: { $ne: true } }; // Exclude deleted vehicles
 
     if (status) {
       // Handle both single status and array of statuses
@@ -297,6 +347,55 @@ exports.updateVehicle = async (req, res) => {
       updateData.lastUpdatedBy = req.user ? req.user._id : null;
     }
 
+    // Auto-create or find shipper if shipper details are provided and shipperId is not set
+    if (updateData.shipperName && updateData.shipperCompany && !updateData.shipperId) {
+      try {
+        let shipper = null;
+        if (updateData.shipperEmail) {
+          shipper = await Shipper.findOne({
+            shipperCompany: updateData.shipperCompany.trim(),
+            shipperEmail: updateData.shipperEmail.toLowerCase().trim()
+          });
+        } else {
+          shipper = await Shipper.findOne({
+            shipperCompany: updateData.shipperCompany.trim(),
+            shipperName: updateData.shipperName.trim()
+          });
+        }
+
+        if (!shipper) {
+          // Create new shipper
+          shipper = await Shipper.create({
+            shipperName: updateData.shipperName.trim(),
+            shipperCompany: updateData.shipperCompany.trim(),
+            shipperEmail: updateData.shipperEmail ? updateData.shipperEmail.toLowerCase().trim() : undefined,
+            shipperPhone: updateData.shipperPhone ? updateData.shipperPhone.trim() : undefined,
+            createdBy: req.user?._id,
+            lastUpdatedBy: req.user?._id
+          });
+
+          // Log shipper creation
+          await AuditLog.create({
+            action: 'create_shipper',
+            entityType: 'shipper',
+            entityId: shipper._id,
+            userId: req.user?._id,
+            details: {
+              shipperName: shipper.shipperName,
+              shipperCompany: shipper.shipperCompany,
+              shipperEmail: shipper.shipperEmail
+            },
+            notes: `Auto-created shipper ${shipper.shipperCompany} from vehicle update`
+          });
+        }
+
+        updateData.shipperId = shipper._id;
+      } catch (shipperError) {
+        console.error('Error creating/finding shipper:', shipperError);
+        // Continue with vehicle update even if shipper creation fails
+      }
+    }
+
     const vehicle = await Vehicle.findByIdAndUpdate(
       vehicleId,
       updateData,
@@ -471,6 +570,64 @@ exports.deleteVehicle = async (req, res) => {
       });
     }
 
+    // Find all transport jobs associated with this vehicle (including deleted ones for reference)
+    const transportJobs = await TransportJob.find({ vehicleId: vehicleId });
+
+    // Build effects message for confirmation
+    const effects = [];
+    if (transportJobs.length > 0) {
+      effects.push(`This vehicle has ${transportJobs.length} transport job(s) that will be preserved.`);
+      
+      // Check if any transport jobs are in routes
+      const Route = require('../models/Route');
+      let routesAffected = 0;
+      for (const job of transportJobs) {
+        const routes = await Route.find({
+          deleted: { $ne: true }, // Only count non-deleted routes
+          $or: [
+            { 'stops.transportJobId': job._id },
+            { selectedTransportJobs: job._id }
+          ]
+        });
+        routesAffected += routes.length;
+      }
+      if (routesAffected > 0) {
+        effects.push(`These transport jobs are referenced in ${routesAffected} route(s).`);
+      }
+    }
+
+    // Check if confirmation is required (if there are effects)
+    if (effects.length > 0 && (!req.body || !req.body.confirm)) {
+      return res.status(400).json({
+        success: false,
+        requiresConfirmation: true,
+        message: 'Deleting this vehicle will have the following effects:',
+        effects: effects,
+        confirmationMessage: 'Please confirm deletion by including { "confirm": true } in the request body.'
+      });
+    }
+
+    // Add labels to transport jobs indicating vehicle was deleted
+    const deletionTime = new Date();
+    const deletionLabel = `Vehicle was deleted at ${deletionTime.toLocaleString()}`;
+    
+    for (const job of transportJobs) {
+      await TransportJob.findByIdAndUpdate(job._id, {
+        $set: { 
+          vehicleDeleted: true,
+          vehicleDeletedAt: deletionTime,
+          vehicleDeletionLabel: deletionLabel
+          // Keep vehicleId for reference - don't remove it
+        }
+      });
+    }
+
+    // Soft delete the vehicle (mark as deleted instead of actually deleting)
+    await Vehicle.findByIdAndUpdate(vehicleId, {
+      deleted: true,
+      deletedAt: deletionTime
+    });
+
     // Log vehicle deletion (only if user ID is valid ObjectId)
     const isValidObjectId = req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id);
     await AuditLog.create({
@@ -484,22 +641,17 @@ exports.deleteVehicle = async (req, res) => {
         year: vehicle.year,
         make: vehicle.make,
         model: vehicle.model,
-        currentTransportJobId: vehicle.currentTransportJobId
+        currentTransportJobId: vehicle.currentTransportJobId,
+        transportJobsAffected: transportJobs.length,
+        effects: effects
       },
-      notes: `Deleted vehicle ${vehicle.vin} (${vehicle.year} ${vehicle.make} ${vehicle.model})`
+      notes: `Soft deleted vehicle ${vehicle.vin} (${vehicle.year} ${vehicle.make} ${vehicle.model}). ${effects.join(' ')}`
     });
-
-    // If there's a transport job, delete it too
-    if (vehicle.currentTransportJobId) {
-      await TransportJob.findByIdAndDelete(vehicle.currentTransportJobId);
-    }
-
-    // Delete the vehicle
-    await Vehicle.findByIdAndDelete(vehicleId);
 
     res.status(200).json({
       success: true,
-      message: 'Vehicle and associated transport job deleted successfully'
+      message: 'Vehicle deleted successfully. Associated transport jobs have been preserved.',
+      effects: effects
     });
   } catch (error) {
     console.error('Error deleting vehicle:', error);

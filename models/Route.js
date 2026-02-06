@@ -338,6 +338,15 @@ const routeSchema = new mongoose.Schema({
   lastUpdatedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+
+  // Soft delete fields
+  deleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
+    type: Date
   }
 }, {
   timestamps: true
@@ -352,6 +361,7 @@ routeSchema.index({ 'selectedTransportJobs': 1 });
 routeSchema.index({ 'stops.transportJobId': 1 });
 routeSchema.index({ 'stops.sequence': 1 });
 routeSchema.index({ createdAt: -1 });
+routeSchema.index({ deleted: 1 });
 
 // Pre-save middleware to generate route number, initialize checklists, and populate formattedAddress
 routeSchema.pre('save', async function(next) {

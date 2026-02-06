@@ -91,7 +91,7 @@ exports.getAllTransportJobs = async (req, res) => {
     const { page = 1, limit = 50, status, carrier, search, startDate, endDate } = req.query;
 
     // Build query
-    let query = {};
+    let query = { deleted: { $ne: true } }; // Exclude deleted transport jobs
 
     if (status) {
       // Handle both single status and array of statuses
@@ -320,7 +320,8 @@ exports.updateTransportJob = async (req, res) => {
  */
 exports.deleteTransportJob = async (req, res) => {
   try {
-    const transportJob = await TransportJob.findById(req.params.id);
+    const transportJob = await TransportJob.findById(req.params.id)
+      .populate('vehicleId');
 
     if (!transportJob) {
       return res.status(404).json({
@@ -329,13 +330,132 @@ exports.deleteTransportJob = async (req, res) => {
       });
     }
 
-    // Check if transport job is part of an active route
-    if (transportJob.routeId) {
+    const Route = require('../models/Route');
+    const { calculateVehicleStatusFromJobs } = require('../utils/statusManager');
+    const { VEHICLE_STATUS } = require('../constants/status');
+
+    // Find all routes that have stops referencing this transport job (only non-deleted routes)
+    const routesWithJob = await Route.find({
+      deleted: { $ne: true }, // Only count non-deleted routes
+      $or: [
+        { 'stops.transportJobId': req.params.id },
+        { selectedTransportJobs: req.params.id }
+      ]
+    });
+
+    // Build effects message for confirmation
+    const effects = [];
+    if (routesWithJob.length > 0) {
+      effects.push(`This transport job is referenced in ${routesWithJob.length} route(s).`);
+    }
+    if (transportJob.vehicleId) {
+      const vehicle = await Vehicle.findById(transportJob.vehicleId);
+      if (vehicle && !vehicle.deleted) {
+        const allJobs = await TransportJob.find({ 
+          vehicleId: transportJob.vehicleId,
+          deleted: { $ne: true } // Only count non-deleted jobs
+        });
+        if (allJobs.length === 1) {
+          effects.push(`Vehicle status will be set to "Intake Completed" (this is the only transport job).`);
+        } else {
+          effects.push(`Vehicle status will be recalculated based on remaining ${allJobs.length - 1} transport job(s).`);
+        }
+      }
+    }
+
+    // Check if confirmation is required (if there are effects)
+    if (effects.length > 0 && (!req.body || !req.body.confirm)) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete transport job that is part of a route. Please remove it from the route first.'
+        requiresConfirmation: true,
+        message: 'Deleting this transport job will have the following effects:',
+        effects: effects,
+        confirmationMessage: 'Please confirm deletion by including { "confirm": true } in the request body.'
       });
     }
+
+    // Update vehicle status based on remaining transport jobs (only if vehicle is not deleted)
+    if (transportJob.vehicleId) {
+      const vehicleId = typeof transportJob.vehicleId === 'object'
+        ? (transportJob.vehicleId._id || transportJob.vehicleId.id)
+        : transportJob.vehicleId;
+      
+      const vehicle = await Vehicle.findById(vehicleId);
+      if (vehicle && !vehicle.deleted) {
+        // Get all remaining non-deleted transport jobs for this vehicle
+        const remainingJobs = await TransportJob.find({
+          vehicleId: vehicleId,
+          _id: { $ne: req.params.id },
+          deleted: { $ne: true }
+        });
+
+        if (remainingJobs.length === 0) {
+          // No remaining jobs - set vehicle to "Intake Completed"
+          await Vehicle.findByIdAndUpdate(vehicleId, {
+            status: VEHICLE_STATUS.INTAKE_COMPLETE,
+            currentTransportJobId: null,
+            $pull: { transportJobs: { transportJobId: req.params.id } }
+          });
+        } else {
+          // Recalculate vehicle status based on remaining jobs
+          const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
+          await Vehicle.findByIdAndUpdate(vehicleId, {
+            status: newVehicleStatus,
+            $pull: { transportJobs: { transportJobId: req.params.id } }
+          });
+          
+          // If the deleted job was the current one, set a new current job
+          if (vehicle.currentTransportJobId && vehicle.currentTransportJobId.toString() === req.params.id.toString()) {
+            await Vehicle.findByIdAndUpdate(vehicleId, {
+              currentTransportJobId: remainingJobs[0]._id
+            });
+          }
+        }
+      }
+    }
+
+    // Add labels to route stops that reference this transport job
+    const deletionTime = new Date();
+    const deletionLabel = `Transport job was deleted at ${deletionTime.toLocaleString()}`;
+    
+    // Find all routes (including deleted ones) that have stops referencing this transport job
+    const allRoutesWithJob = await Route.find({
+      $or: [
+        { 'stops.transportJobId': req.params.id },
+        { selectedTransportJobs: req.params.id }
+      ]
+    });
+    
+    for (const route of allRoutesWithJob) {
+      let routeUpdated = false;
+      
+      // Update stops that reference this transport job
+      route.stops.forEach(stop => {
+        const stopJobId = typeof stop.transportJobId === 'object'
+          ? (stop.transportJobId._id || stop.transportJobId.id)
+          : stop.transportJobId;
+        
+        if (stopJobId && stopJobId.toString() === req.params.id.toString()) {
+          // Add label to the stop
+          if (!stop.label) {
+            stop.label = deletionLabel;
+          } else {
+            stop.label = `${stop.label}\n${deletionLabel}`;
+          }
+          routeUpdated = true;
+        }
+      });
+      
+      if (routeUpdated) {
+        await route.save();
+      }
+    }
+
+    // Soft delete the transport job (mark as deleted instead of actually deleting)
+    await TransportJob.findByIdAndUpdate(req.params.id, {
+      deleted: true,
+      deletedAt: deletionTime
+    });
 
     // Log transport job deletion
     await AuditLog.create({
@@ -347,23 +467,17 @@ exports.deleteTransportJob = async (req, res) => {
       details: {
         jobNumber: transportJob.jobNumber,
         vehicleId: transportJob.vehicleId,
-        status: transportJob.status
+        status: transportJob.status,
+        routesAffected: routesWithJob.length,
+        effects: effects
       },
-      notes: `Deleted transport job ${transportJob.jobNumber || req.params.id}`
+      notes: `Soft deleted transport job ${transportJob.jobNumber || req.params.id}. ${effects.join(' ')}`
     });
-
-    // Remove transport job reference from vehicle
-    if (transportJob.vehicleId) {
-      await Vehicle.findByIdAndUpdate(transportJob.vehicleId, {
-        $unset: { transportJobId: 1 }
-      });
-    }
-
-    await TransportJob.findByIdAndDelete(req.params.id);
 
     res.status(200).json({
       success: true,
-      message: 'Transport job deleted successfully'
+      message: 'Transport job deleted successfully. Data preserved for route stops.',
+      effects: effects
     });
   } catch (error) {
     console.error('Error deleting transport job:', error);

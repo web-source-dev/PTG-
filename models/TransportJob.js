@@ -230,6 +230,28 @@ const transportJobSchema = new mongoose.Schema({
     type: Number
   },
 
+  // Deletion tracking (for vehicle deletion)
+  vehicleDeleted: {
+    type: Boolean,
+    default: false
+  },
+  vehicleDeletedAt: {
+    type: Date
+  },
+  vehicleDeletionLabel: {
+    type: String,
+    trim: true
+  },
+
+  // Soft delete fields (for transport job deletion)
+  deleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
+    type: Date
+  },
+
   // Audit Trail
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
@@ -261,6 +283,7 @@ transportJobSchema.index({ routeId: 1 }); // Backward compatibility
 transportJobSchema.index({ pickupRouteId: 1 });
 transportJobSchema.index({ dropRouteId: 1 });
 transportJobSchema.index({ createdAt: -1 });
+transportJobSchema.index({ deleted: 1 });
 
 // Pre-save middleware to generate job number and populate formattedAddress fields
 transportJobSchema.pre('save', async function(next) {

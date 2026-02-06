@@ -127,11 +127,14 @@ const updateVehicleOnCreate = async (vehicleId) => {
  */
 const calculateVehicleStatusFromJobs = async (vehicleId) => {
   try {
-    // Get all transport jobs for this vehicle
-    const transportJobs = await TransportJob.find({ vehicleId }).select('status');
+    // Get all non-deleted transport jobs for this vehicle
+    const transportJobs = await TransportJob.find({ 
+      vehicleId,
+      deleted: { $ne: true } // Exclude deleted transport jobs
+    }).select('status');
 
     if (transportJobs.length === 0) {
-      return VEHICLE_STATUS.INTAKE_COMPLETED;
+      return VEHICLE_STATUS.INTAKE_COMPLETE;
     }
 
     // Check status priority
@@ -171,7 +174,7 @@ const calculateVehicleStatusFromJobs = async (vehicleId) => {
     return VEHICLE_STATUS.READY_FOR_TRANSPORT;
   } catch (error) {
     console.error('Error calculating vehicle status from jobs:', error);
-    return VEHICLE_STATUS.INTAKE_COMPLETED;
+    return VEHICLE_STATUS.INTAKE_COMPLETE;
   }
 };
 
@@ -342,7 +345,7 @@ const updateStatusOnStopsSetup = async (routeId, stops = null) => {
     for (const jobId of transportJobIds) {
       // Get current transport job status
       const job = await TransportJob.findById(jobId).populate('vehicleId');
-      if (!job) continue;
+      if (!job || job.deleted) continue; // Skip deleted transport jobs
 
       // Check what stop types are being added in THIS route for this job
       const stopsForThisJob = stopsToProcess.filter(stop => {
@@ -380,7 +383,7 @@ const updateStatusOnStopsSetup = async (routeId, stops = null) => {
         const vehicleId = job.vehicleId._id || job.vehicleId;
         const vehicle = await Vehicle.findById(vehicleId);
         
-        if (vehicle) {
+        if (vehicle && !vehicle.deleted) {
           // Only update vehicle status if it can be upgraded
           // Don't downgrade from "In Transport" or "Delivered" back to "Ready for Transport"
           if (vehicle.status === VEHICLE_STATUS.READY_FOR_TRANSPORT) {
@@ -424,8 +427,9 @@ const updateStatusOnStopsSetup = async (routeId, stops = null) => {
  */
 const isTransportJobFullyCompleted = async (transportJobId) => {
   try {
-    // Find all routes that have stops for this transport job
+    // Find all non-deleted routes that have stops for this transport job
     const routesWithJob = await Route.find({
+      deleted: { $ne: true }, // Exclude deleted routes
       $or: [
         { 'stops.transportJobId': transportJobId },
         { selectedTransportJobs: transportJobId }
@@ -539,19 +543,25 @@ const updateStatusOnRouteStatusChange = async (routeId, newStatus, oldStatus) =>
     } else if (newStatus === ROUTE_STATUS.CANCELLED) {
       // Route cancelled - reset transport jobs and recalculate vehicle statuses
       for (const jobId of transportJobIds) {
+        const job = await TransportJob.findById(jobId).populate('vehicleId');
+        if (!job || job.deleted) continue; // Skip deleted transport jobs
+
         await TransportJob.findByIdAndUpdate(jobId, {
           status: TRANSPORT_JOB_STATUS.NEEDS_DISPATCH,
           $unset: { assignedDriver: 1 }
         });
 
         // Get the transport job to find the vehicle
-        const job = await TransportJob.findById(jobId).populate('vehicleId');
-        if (job && job.vehicleId) {
-          // Recalculate vehicle status based on all transport jobs
-          const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-            status: newVehicleStatus
-          });
+        if (job.vehicleId) {
+          const vehicleId = job.vehicleId._id || job.vehicleId;
+          const vehicle = await Vehicle.findById(vehicleId);
+          if (vehicle && !vehicle.deleted) {
+            // Recalculate vehicle status based on all transport jobs
+            const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
+            await Vehicle.findByIdAndUpdate(vehicleId, {
+              status: newVehicleStatus
+            });
+          }
         }
       }
 
@@ -599,11 +609,14 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
         // Update vehicle's transportJobs history array
         await updateVehicleTransportJobsHistory(jobId, TRANSPORT_JOB_STATUS.DELIVERED);
 
-        // Get the transport job to find the vehicle
-        const job = await TransportJob.findById(jobId).populate('vehicleId');
-        if (job && job.vehicleId) {
+      // Get the transport job to find the vehicle
+      const job = await TransportJob.findById(jobId).populate('vehicleId');
+      if (job && !job.deleted && job.vehicleId) {
+        const vehicleId = job.vehicleId._id || job.vehicleId;
+        const vehicle = await Vehicle.findById(vehicleId);
+        if (vehicle && !vehicle.deleted) {
           // Recalculate vehicle status based on all transport jobs
-          const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
+          const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
           const updateData = { status: newVehicleStatus };
 
           // Add deliveredAt timestamp if vehicle is now fully delivered
@@ -611,8 +624,9 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
             updateData.deliveredAt = new Date();
           }
 
-          await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, updateData);
+          await Vehicle.findByIdAndUpdate(vehicleId, updateData);
         }
+      }
       }
     }
 
@@ -632,12 +646,16 @@ const updateStatusOnStopUpdate = async (routeId, stopIndex, newStopStatus, stopT
 
       // Get the transport job to find the vehicle
       const job = await TransportJob.findById(jobId).populate('vehicleId');
-      if (job && job.vehicleId) {
-        // Recalculate vehicle status based on all transport jobs
-        const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId._id || job.vehicleId);
-        await Vehicle.findByIdAndUpdate(job.vehicleId._id || job.vehicleId, {
-          status: newVehicleStatus
-        });
+      if (job && !job.deleted && job.vehicleId) {
+        const vehicleId = job.vehicleId._id || job.vehicleId;
+        const vehicle = await Vehicle.findById(vehicleId);
+        if (vehicle && !vehicle.deleted) {
+          // Recalculate vehicle status based on all transport jobs
+          const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
+          await Vehicle.findByIdAndUpdate(vehicleId, {
+            status: newVehicleStatus
+          });
+        }
       }
     }
 
@@ -696,8 +714,8 @@ const updateStatusOnTransportJobRemoved = async (transportJobId) => {
     // Get the transport job first to find the vehicle
     const job = await TransportJob.findById(transportJobId).select('vehicleId status pickupRouteId dropRouteId jobNumber');
 
-    if (!job) {
-      console.error('Transport job not found for removal:', transportJobId);
+    if (!job || job.deleted) {
+      console.error('Transport job not found or deleted for removal:', transportJobId);
       return;
     }
 
@@ -722,10 +740,14 @@ const updateStatusOnTransportJobRemoved = async (transportJobId) => {
 
     // Update vehicle status based on all its remaining transport jobs
     if (job.vehicleId) {
-      const newVehicleStatus = await calculateVehicleStatusFromJobs(job.vehicleId);
-      await Vehicle.findByIdAndUpdate(job.vehicleId, {
-        status: newVehicleStatus
-      });
+      const vehicleId = job.vehicleId._id || job.vehicleId;
+      const vehicle = await Vehicle.findById(vehicleId);
+      if (vehicle && !vehicle.deleted) {
+        const newVehicleStatus = await calculateVehicleStatusFromJobs(vehicleId);
+        await Vehicle.findByIdAndUpdate(vehicleId, {
+          status: newVehicleStatus
+        });
+      }
     }
 
   } catch (error) {
@@ -887,8 +909,9 @@ const syncTransportJobToRouteStops = async (transportJobId) => {
       return;
     }
 
-    // Find all routes that have stops referencing this transport job
+    // Find all non-deleted routes that have stops referencing this transport job
     const routes = await Route.find({
+      deleted: { $ne: true }, // Exclude deleted routes
       'stops.transportJobId': transportJobId
     });
 
@@ -958,8 +981,8 @@ const syncRouteStopToTransportJob = async (routeId, stopId) => {
   try {
     // Get the route with the updated stop
     const route = await Route.findById(routeId);
-    if (!route || !route.stops) {
-      console.warn(`⚠️ Route ${routeId} or stops not found, skipping sync`);
+    if (!route || route.deleted || !route.stops) {
+      console.warn(`⚠️ Route ${routeId} not found, deleted, or stops not found, skipping sync`);
       return;
     }
 
@@ -984,8 +1007,8 @@ const syncRouteStopToTransportJob = async (routeId, stopId) => {
 
     // Get the transport job
     const transportJob = await TransportJob.findById(stop.transportJobId);
-    if (!transportJob) {
-      console.warn(`⚠️ Transport job ${stop.transportJobId} not found, skipping sync`);
+    if (!transportJob || transportJob.deleted) {
+      console.warn(`⚠️ Transport job ${stop.transportJobId} not found or deleted, skipping sync`);
       return;
     }
 
@@ -1083,7 +1106,7 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
     // Update each transport job with route references
     for (const [jobId, jobInfo] of transportJobRoutes.entries()) {
       const transportJob = await TransportJob.findById(jobId);
-      if (!transportJob) continue;
+      if (!transportJob || transportJob.deleted) continue; // Skip deleted transport jobs
 
       const updateData = {};
 
@@ -1118,33 +1141,37 @@ const updateTransportJobRouteReferences = async (routeId, stops) => {
         // Also update the routeId in the vehicle's transportJobs array
         if (transportJob.vehicleId) {
           const vehicleId = transportJob.vehicleId._id || transportJob.vehicleId;
-          const mongoose = require('mongoose');
-          const jobObjectId = typeof jobId === 'string' 
-            ? new mongoose.Types.ObjectId(jobId)
-            : jobId;
+          const vehicle = await Vehicle.findById(vehicleId);
+          if (vehicle && !vehicle.deleted) {
+            const mongoose = require('mongoose');
+            const jobObjectId = typeof jobId === 'string' 
+              ? new mongoose.Types.ObjectId(jobId)
+              : jobId;
 
-          // Update routeId in vehicle's transportJobs array
-          await Vehicle.findByIdAndUpdate(
-            vehicleId,
-            {
-              $set: {
-                'transportJobs.$[elem].routeId': routeId
+            // Update routeId in vehicle's transportJobs array
+            await Vehicle.findByIdAndUpdate(
+              vehicleId,
+              {
+                $set: {
+                  'transportJobs.$[elem].routeId': routeId
+                }
+              },
+              {
+                arrayFilters: [
+                  { 'elem.transportJobId': jobObjectId }
+                ]
               }
-            },
-            {
-              arrayFilters: [
-                { 'elem.transportJobId': jobObjectId }
-              ]
-            }
-          );
+            );
           }
+        }
       }
     }
 
     // Handle transport jobs that were removed from this route
-    // Find all transport jobs that currently have this route as pickupRouteId or dropRouteId
+    // Find all non-deleted transport jobs that currently have this route as pickupRouteId or dropRouteId
     // but are no longer in the stops
     const transportJobsWithThisRoute = await TransportJob.find({
+      deleted: { $ne: true }, // Exclude deleted transport jobs
       $or: [
         { pickupRouteId: routeId },
         { dropRouteId: routeId }

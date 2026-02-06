@@ -21,6 +21,10 @@ const vehicleSchema = new mongoose.Schema({
   },
 
   // Shipper Details
+  shipperId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shipper'
+  },
   shipperName: {
     type: String,
     trim: true
@@ -230,6 +234,15 @@ const vehicleSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+
+  // Soft delete fields
+  deleted: {
+    type: Boolean,
+    default: false
+  },
+  deletedAt: {
+    type: Date
+  },
 }, {
   timestamps: true
 });
@@ -272,5 +285,6 @@ vehicleSchema.pre('save', function(next) {
 // Index for efficient queries
 vehicleSchema.index({ vin: 1 });
 vehicleSchema.index({ status: 1 });
+vehicleSchema.index({ deleted: 1 });
 
 module.exports = mongoose.model('Vehicle', vehicleSchema);

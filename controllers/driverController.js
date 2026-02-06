@@ -4,7 +4,7 @@ const Truck = require('../models/Truck');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const routeTracker = require('../utils/routeTracker');
-const { ROUTE_STATE, TRUCK_STATUS } = require('../constants/status');
+const { ROUTE_STATE, TRUCK_STATUS, ROUTE_STATUS } = require('../constants/status');
 const {
   updateStatusOnStopUpdate
 } = require('../utils/statusManager');
@@ -17,8 +17,11 @@ exports.getMyRoutes = async (req, res) => {
     const { page = 1, limit = 50, status, startDate, endDate } = req.query;
     const driverId = req.user._id;
 
-    // Build query - only routes assigned to this driver
-    let query = { driverId };
+    // Build query - only routes assigned to this driver (exclude deleted)
+    let query = { 
+      driverId,
+      deleted: { $ne: true } // Exclude deleted routes
+    };
 
     if (status) {
       // Handle comma-separated status values
@@ -187,10 +190,20 @@ exports.startMyRoute = async (req, res) => {
 
     // Check if driver already has an active route
     if (req.user.currentRouteId && req.user.currentRouteId.toString() !== routeId) {
-      return res.status(400).json({
-        success: false,
-        message: 'You already have an active route. Please complete your current route before starting a new one.'
-      });
+      // Check if the current route is completed - if so, clear it and allow starting new route
+      const currentRoute = await Route.findById(req.user.currentRouteId);
+      if (currentRoute && currentRoute.status === ROUTE_STATUS.COMPLETED) {
+        // Clear the completed route from driver's currentRouteId
+        await User.findByIdAndUpdate(req.user._id, {
+          $unset: { currentRouteId: 1 }
+        });
+      } else {
+        // Current route is still active (not completed), so prevent starting new route
+        return res.status(400).json({
+          success: false,
+          message: 'You already have an active route. Please complete your current route before starting a new one.'
+        });
+      }
     }
 
     // Update route status and state

@@ -44,6 +44,7 @@ exports.globalSearch = async (req, res) => {
         ]
       }).select('_id').limit(50),
       Route.find({
+        deleted: { $ne: true }, // Exclude deleted routes
         routeNumber: searchRegex
       }).select('_id').limit(50)
     ]);
@@ -84,8 +85,9 @@ exports.globalSearch = async (req, res) => {
 
     // Search across all entities in parallel for better performance
     const searchPromises = [
-      // Vehicles
+      // Vehicles (exclude deleted)
       Vehicle.find({
+        deleted: { $ne: true }, // Exclude deleted vehicles
         $or: [
           { vin: searchRegex },
           { make: searchRegex },
@@ -99,8 +101,9 @@ exports.globalSearch = async (req, res) => {
       .limit(searchLimit)
       .sort({ createdAt: -1 }),
 
-      // Routes
+      // Routes (exclude deleted)
       Route.find({
+        deleted: { $ne: true }, // Exclude deleted routes
         $or: [
           { routeNumber: searchRegex }
         ]
@@ -111,8 +114,9 @@ exports.globalSearch = async (req, res) => {
       .limit(searchLimit)
       .sort({ createdAt: -1 }),
 
-      // Transport Jobs
+      // Transport Jobs (exclude deleted)
       TransportJob.find({
+        deleted: { $ne: true }, // Exclude deleted transport jobs
         $or: [
           { jobNumber: searchRegex }
         ]
@@ -327,6 +331,7 @@ exports.advancedSearch = async (req, res) => {
       switch (type) {
         case 'vehicle':
           query = {
+            deleted: { $ne: true }, // Exclude deleted vehicles
             $or: [
               { vin: searchRegex },
               { make: searchRegex },
@@ -340,6 +345,7 @@ exports.advancedSearch = async (req, res) => {
 
         case 'route':
           query = {
+            deleted: { $ne: true }, // Exclude deleted routes
             $or: [
               { routeNumber: searchRegex }
             ]
@@ -349,6 +355,7 @@ exports.advancedSearch = async (req, res) => {
 
         case 'transportJob':
           query = {
+            deleted: { $ne: true }, // Exclude deleted transport jobs
             $or: [
               { jobNumber: searchRegex }
             ]
