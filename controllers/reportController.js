@@ -106,19 +106,31 @@ exports.getDriverReport = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight'
+          }
+        ]
       })
       .sort({ plannedStartDate: -1 });
 
@@ -145,6 +157,7 @@ exports.getDriverReport = async (req, res) => {
       _id: { $in: Array.from(transportJobIds) }
     })
       .populate('vehicleId', 'vin year make model')
+      .populate('loadId', 'loadNumber loadType description weight')
       .populate('pickupRouteId', 'routeNumber status')
       .populate('dropRouteId', 'routeNumber status')
       .sort({ createdAt: -1 });
@@ -166,7 +179,12 @@ exports.getDriverReport = async (req, res) => {
     const totalCost = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
     const totalCarrierPayment = transportJobs.reduce((sum, tj) => sum + (tj.carrierPayment || 0), 0);
     const totalGallons = expenses.filter(e => e.type === 'fuel' && e.gallons).reduce((sum, e) => sum + (e.gallons || 0), 0);
-    
+
+    // Calculate total distance - use planned distance (totalDistance.value)
+    const totalDistance = routes.reduce((sum, r) => {
+      return sum + (r.totalDistance?.value || 0);
+    }, 0);
+
     // Calculate expense breakdown by type
     const expenseBreakdown = {
       fuel: {
@@ -198,7 +216,7 @@ exports.getDriverReport = async (req, res) => {
         cost: expenses.filter(e => e.type === 'other').reduce((sum, e) => sum + (e.totalCost || 0), 0)
       }
     };
-    
+
     const summary = {
       totalRoutes: routes.length,
       totalTransportJobs: transportJobIds.size,
@@ -208,7 +226,7 @@ exports.getDriverReport = async (req, res) => {
       totalFuelCost: expenseBreakdown.fuel.cost,
       totalMaintenanceCost: expenseBreakdown.maintenance.cost,
       totalCost,
-      totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0), // Already in miles
+      totalDistance, // Uses planned distance (totalDistance.value)
       totalCarrierPayment,
       netAmount: totalCarrierPayment - totalCost,
       totalGallons,
@@ -271,19 +289,31 @@ exports.getTruckReport = async (req, res) => {
       .populate('driverId', 'firstName lastName email phoneNumber')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight'
+          }
+        ]
       })
       .sort({ plannedStartDate: -1 });
 
@@ -322,6 +352,7 @@ exports.getTruckReport = async (req, res) => {
       _id: { $in: Array.from(transportJobIds) }
     })
       .populate('vehicleId', 'vin year make model')
+      .populate('loadId', 'loadNumber loadType description weight')
       .populate('pickupRouteId', 'routeNumber status')
       .populate('dropRouteId', 'routeNumber status')
       .sort({ createdAt: -1 });
@@ -343,7 +374,12 @@ exports.getTruckReport = async (req, res) => {
     const totalCost = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
     const totalCarrierPayment = transportJobs.reduce((sum, tj) => sum + (tj.carrierPayment || 0), 0);
     const totalGallons = expenses.filter(e => e.type === 'fuel' && e.gallons).reduce((sum, e) => sum + (e.gallons || 0), 0);
-    
+
+    // Calculate total distance - use planned distance (totalDistance.value)
+    const totalDistance = routes.reduce((sum, r) => {
+      return sum + (r.totalDistance?.value || 0);
+    }, 0);
+
     // Calculate expense breakdown by type
     const expenseBreakdown = {
       fuel: {
@@ -375,7 +411,7 @@ exports.getTruckReport = async (req, res) => {
         cost: expenses.filter(e => e.type === 'other').reduce((sum, e) => sum + (e.totalCost || 0), 0)
       }
     };
-    
+
     const summary = {
       totalRoutes: routes.length,
       totalDrivers: driverIds.size,
@@ -386,7 +422,7 @@ exports.getTruckReport = async (req, res) => {
       totalFuelCost: expenseBreakdown.fuel.cost,
       totalMaintenanceCost: expenseBreakdown.maintenance.cost,
       totalCost,
-      totalDistance: routes.reduce((sum, r) => sum + (r.totalDistance?.value || 0), 0), // Already in miles
+      totalDistance, // Uses planned distance (totalDistance.value)
       totalGallons,
       totalCarrierPayment,
       netAmount: totalCarrierPayment - totalCost,
@@ -437,19 +473,31 @@ exports.getRouteReport = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year status')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip'
+          }
+        ]
       })
       .populate('createdBy', 'firstName lastName email')
       .populate('lastUpdatedBy', 'firstName lastName email');
@@ -482,6 +530,7 @@ exports.getRouteReport = async (req, res) => {
       _id: { $in: Array.from(transportJobIds) }
     })
       .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip dropLocationName dropCity dropState dropZip')
+      .populate('loadId', 'loadNumber loadType description weight initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip')
       .populate('pickupRouteId', 'routeNumber status')
       .populate('dropRouteId', 'routeNumber status')
       .sort({ createdAt: -1 });
@@ -528,6 +577,9 @@ exports.getRouteReport = async (req, res) => {
       }
     };
     
+    // Use planned distance (totalDistance.value)
+    const totalDistance = route.totalDistance?.value || 0;
+
     const summary = {
       totalTransportJobs: transportJobIds.size,
       totalExpenses: expenses.length,
@@ -536,7 +588,7 @@ exports.getRouteReport = async (req, res) => {
       totalFuelCost: expenseBreakdown.fuel.cost,
       totalMaintenanceCost: expenseBreakdown.maintenance.cost,
       totalCost,
-      totalDistance: route.totalDistance?.value || 0,
+      totalDistance, // Uses planned distance (totalDistance.value)
       totalDuration: route.totalDuration?.value || 0,
       totalCarrierPayment,
       totalGallons: expenses.filter(e => e.type === 'fuel' && e.gallons).reduce((sum, e) => sum + (e.gallons || 0), 0),
@@ -1034,9 +1086,9 @@ exports.getOverallSummary = async (req, res) => {
     const totalExpenses = expenses.reduce((sum, e) => sum + (e.totalCost || 0), 0);
     const netAmount = totalCarrierPayment - totalExpenses;
 
-    // Calculate total miles driven (from routes - already in miles)
+    // Calculate total miles driven (from routes - use planned distance)
     const totalMiles = routes.reduce((sum, route) => {
-      return sum + (route.totalDistance?.value || 0); // Already in miles
+      return sum + (route.totalDistance?.value || 0);
     }, 0);
 
     // Total loads completed (unique transport jobs)

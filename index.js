@@ -53,6 +53,7 @@ app.use('/api/calendar', require('./routes/calendar'));
 app.use('/api/reports', require('./routes/report'));
 app.use('/api/vehicle-profit-calculations', require('./routes/vehicleProfitCalculation'));
 app.use('/api/shippers', require('./routes/shipper'));
+app.use('/api/loads', require('./routes/load'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

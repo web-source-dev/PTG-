@@ -1,8 +1,70 @@
 const Shipper = require('../models/Shipper');
 const Vehicle = require('../models/Vehicle');
+const Load = require('../models/Load');
 const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
 const AuditLog = require('../models/AuditLog');
+
+/**
+ * Utility function to recalculate shipper statistics
+ */
+async function recalculateShipperStatistics(shipperId) {
+  const shipper = await Shipper.findById(shipperId);
+  if (!shipper) return;
+
+  // Calculate vehicle statistics
+  const totalVehicles = await Vehicle.countDocuments({
+    shipperId: shipper._id,
+    deleted: { $ne: true }
+  });
+
+  const totalDeliveredVehicles = await Vehicle.countDocuments({
+    shipperId: shipper._id,
+    status: 'Delivered',
+    deleted: { $ne: true }
+  });
+
+  // Calculate load statistics
+  const totalLoads = await Load.countDocuments({
+    shipperId: shipper._id,
+    deleted: { $ne: true }
+  });
+
+  const totalDeliveredLoads = await Load.countDocuments({
+    shipperId: shipper._id,
+    status: 'Delivered',
+    deleted: { $ne: true }
+  });
+
+  // Calculate route statistics
+  const transportJobIds = await TransportJob.find({
+    $or: [
+      { vehicleId: { $in: (await Vehicle.find({ shipperId: shipper._id, deleted: { $ne: true } }).distinct('_id')) } },
+      { loadId: { $in: (await Load.find({ shipperId: shipper._id, deleted: { $ne: true } }).distinct('_id')) } }
+    ],
+    deleted: { $ne: true }
+  }).distinct('_id');
+
+  const routes = await Route.find({
+    deleted: { $ne: true },
+    $or: [
+      { 'stops.transportJobId': { $in: transportJobIds } },
+      { selectedTransportJobs: { $in: transportJobIds } }
+    ]
+  });
+
+  const totalRoutes = routes.length;
+  const totalCompletedRoutes = routes.filter(r => r.status === 'Completed').length;
+
+  // Update shipper
+  shipper.totalVehicles = totalVehicles;
+  shipper.totalLoads = totalLoads;
+  shipper.totalDeliveredVehicles = totalDeliveredVehicles;
+  shipper.totalDeliveredLoads = totalDeliveredLoads;
+  shipper.totalRoutes = totalRoutes;
+  shipper.totalCompletedRoutes = totalCompletedRoutes;
+  await shipper.save();
+}
 
 /**
  * Get all shippers with pagination and filters
@@ -72,11 +134,20 @@ exports.getShipperById = async (req, res) => {
     }
 
     // Get vehicles for this shipper (exclude deleted)
-    const vehicles = await Vehicle.find({ 
+    const vehicles = await Vehicle.find({
       shipperId: shipper._id,
       deleted: { $ne: true } // Exclude deleted vehicles
     })
       .select('vin year make model status currentTransportJobId createdAt')
+      .populate('currentTransportJobId', 'jobNumber status')
+      .sort({ createdAt: -1 });
+
+    // Get loads for this shipper (exclude deleted)
+    const loads = await Load.find({
+      shipperId: shipper._id,
+      deleted: { $ne: true } // Exclude deleted loads
+    })
+      .select('loadNumber loadType description weight status currentTransportJobId createdAt')
       .populate('currentTransportJobId', 'jobNumber status')
       .sort({ createdAt: -1 });
 
@@ -87,9 +158,19 @@ exports.getShipperById = async (req, res) => {
       deleted: { $ne: true } // Exclude deleted vehicles
     }).countDocuments();
 
-    // Get routes that contain vehicles from this shipper (exclude deleted transport jobs and routes)
+    // Get delivered loads (exclude deleted)
+    const deliveredLoads = await Load.find({
+      shipperId: shipper._id,
+      status: 'Delivered',
+      deleted: { $ne: true } // Exclude deleted loads
+    }).countDocuments();
+
+    // Get routes that contain vehicles or loads from this shipper (exclude deleted transport jobs and routes)
     const transportJobIds = await TransportJob.find({
-      vehicleId: { $in: vehicles.map(v => v._id) },
+      $or: [
+        { vehicleId: { $in: vehicles.map(v => v._id) } },
+        { loadId: { $in: loads.map(l => l._id) } }
+      ],
       deleted: { $ne: true } // Exclude deleted transport jobs
     }).distinct('_id');
 
@@ -109,7 +190,9 @@ exports.getShipperById = async (req, res) => {
 
     // Update statistics (only count non-deleted items)
     shipper.totalVehicles = vehicles.length;
+    shipper.totalLoads = loads.length;
     shipper.totalDeliveredVehicles = deliveredVehicles;
+    shipper.totalDeliveredLoads = deliveredLoads;
     shipper.totalRoutes = routes.length;
     shipper.totalCompletedRoutes = completedRoutes;
     await shipper.save();
@@ -119,10 +202,13 @@ exports.getShipperById = async (req, res) => {
       data: {
         shipper,
         vehicles,
+        loads,
         routes,
         statistics: {
           totalVehicles: vehicles.length,
+          totalLoads: loads.length,
           totalDeliveredVehicles: deliveredVehicles,
+          totalDeliveredLoads: deliveredLoads,
           totalRoutes: routes.length,
           totalCompletedRoutes: completedRoutes
         }
@@ -369,7 +455,7 @@ exports.getShipperProfile = async (req, res) => {
     }
 
     // Build vehicle query (exclude deleted vehicles)
-    let vehicleQuery = { 
+    let vehicleQuery = {
       shipperId: shipper._id,
       deleted: { $ne: true } // Exclude deleted vehicles
     };
@@ -378,6 +464,19 @@ exports.getShipperProfile = async (req, res) => {
         vehicleQuery.status = { $in: vehicleStatus };
       } else {
         vehicleQuery.status = vehicleStatus;
+      }
+    }
+
+    // Build load query (exclude deleted loads)
+    let loadQuery = {
+      shipperId: shipper._id,
+      deleted: { $ne: true } // Exclude deleted loads
+    };
+    if (vehicleStatus) { // Use same status filter for loads
+      if (Array.isArray(vehicleStatus)) {
+        loadQuery.status = { $in: vehicleStatus };
+      } else {
+        loadQuery.status = vehicleStatus;
       }
     }
 
@@ -394,6 +493,19 @@ exports.getShipperProfile = async (req, res) => {
       }
     }
 
+    // Date filtering for loads
+    if (startDate || endDate) {
+      loadQuery.createdAt = {};
+      if (startDate) {
+        loadQuery.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        loadQuery.createdAt.$lte = end;
+      }
+    }
+
     // Get vehicles
     const vehicleSort = {};
     vehicleSort[sortBy] = sortOrder === 'desc' ? -1 : 1;
@@ -407,9 +519,25 @@ exports.getShipperProfile = async (req, res) => {
 
     const totalVehicles = await Vehicle.countDocuments(vehicleQuery);
 
+    // Get loads
+    const loadSort = {};
+    loadSort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+    const loads = await Load.find(loadQuery)
+      .select('loadNumber loadType description weight status currentTransportJobId createdAt')
+      .populate('currentTransportJobId', 'jobNumber status')
+      .sort(loadSort)
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+
+    const totalLoads = await Load.countDocuments(loadQuery);
+
     // Get transport job IDs for routes (exclude deleted transport jobs)
     const transportJobIds = await TransportJob.find({
-      vehicleId: { $in: vehicles.map(v => v._id) },
+      $or: [
+        { vehicleId: { $in: vehicles.map(v => v._id) } },
+        { loadId: { $in: loads.map(l => l._id) } }
+      ],
       deleted: { $ne: true } // Exclude deleted transport jobs
     }).distinct('_id');
 
@@ -452,21 +580,32 @@ exports.getShipperProfile = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate')
       .sort(routeSort);
 
-    // Calculate statistics (exclude deleted vehicles)
+    // Calculate statistics (exclude deleted vehicles and loads)
     const totalDeliveredVehicles = await Vehicle.countDocuments({
       shipperId: shipper._id,
       status: 'Delivered',
       deleted: { $ne: true } // Exclude deleted vehicles
     });
 
+    const totalDeliveredLoads = await Load.countDocuments({
+      shipperId: shipper._id,
+      status: 'Delivered',
+      deleted: { $ne: true } // Exclude deleted loads
+    });
+
     const completedRoutes = routes.filter(r => r.status === 'Completed').length;
 
-    // Update shipper statistics (exclude deleted vehicles)
-    shipper.totalVehicles = await Vehicle.countDocuments({ 
+    // Update shipper statistics (exclude deleted vehicles and loads)
+    shipper.totalVehicles = await Vehicle.countDocuments({
       shipperId: shipper._id,
       deleted: { $ne: true } // Exclude deleted vehicles
     });
+    shipper.totalLoads = await Load.countDocuments({
+      shipperId: shipper._id,
+      deleted: { $ne: true } // Exclude deleted loads
+    });
     shipper.totalDeliveredVehicles = totalDeliveredVehicles;
+    shipper.totalDeliveredLoads = totalDeliveredLoads;
     shipper.totalRoutes = routes.length;
     shipper.totalCompletedRoutes = completedRoutes;
     await shipper.save();
@@ -484,10 +623,21 @@ exports.getShipperProfile = async (req, res) => {
             limit: parseInt(limit)
           }
         },
+        loads: {
+          data: loads,
+          pagination: {
+            page: parseInt(page),
+            pages: Math.ceil(totalLoads / parseInt(limit)),
+            total: totalLoads,
+            limit: parseInt(limit)
+          }
+        },
         routes,
         statistics: {
           totalVehicles: shipper.totalVehicles,
+          totalLoads: totalLoads,
           totalDeliveredVehicles: shipper.totalDeliveredVehicles,
+          totalDeliveredLoads: totalDeliveredLoads,
           totalRoutes: shipper.totalRoutes,
           totalCompletedRoutes: shipper.totalCompletedRoutes
         }
@@ -498,6 +648,50 @@ exports.getShipperProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to fetch shipper profile',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
+ * Recalculate statistics for all shippers (admin utility)
+ */
+exports.recalculateAllShipperStatistics = async (req, res) => {
+  try {
+    const shippers = await Shipper.find();
+    const results = [];
+
+    for (const shipper of shippers) {
+      try {
+        await recalculateShipperStatistics(shipper._id);
+        results.push({ shipperId: shipper._id, shipperName: shipper.shipperCompany, success: true });
+      } catch (error) {
+        results.push({
+          shipperId: shipper._id,
+          shipperName: shipper.shipperCompany,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Recalculated statistics for ${results.filter(r => r.success).length} out of ${results.length} shippers`,
+      data: {
+        results,
+        summary: {
+          total: results.length,
+          successful: results.filter(r => r.success).length,
+          failed: results.filter(r => !r.success).length
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error recalculating shipper statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to recalculate shipper statistics',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }

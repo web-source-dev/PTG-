@@ -1,5 +1,6 @@
 const locationService = require('../utils/locationService');
 const Route = require('../models/Route');
+const RouteTracking = require('../models/routeTracker');
 const User = require('../models/User');
 const routeTracker = require('../utils/routeTracker');
 
@@ -248,7 +249,6 @@ exports.getRouteTracking = async (req, res) => {
   try {
     const { routeId } = req.params;
 
-    const RouteTracking = require('../models/routeTracker');
     const tracking = await RouteTracking.findOne({ routeId }).populate('driverId', 'firstName lastName').populate('truckId', 'truckNumber');
 
     if (!tracking) {
@@ -284,7 +284,6 @@ exports.updateRouteTracking = async (req, res) => {
     }
 
     // Find the route to get driver and truck info
-    const Route = require('../models/Route');
     const route = await Route.findById(routeId);
 
     if (!route) {

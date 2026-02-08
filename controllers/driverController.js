@@ -2,11 +2,14 @@ const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
 const Truck = require('../models/Truck');
 const User = require('../models/User');
+const Vehicle = require('../models/Vehicle');
 const AuditLog = require('../models/AuditLog');
 const routeTracker = require('../utils/routeTracker');
 const { ROUTE_STATE, TRUCK_STATUS, ROUTE_STATUS } = require('../constants/status');
 const {
-  updateStatusOnStopUpdate
+  updateStatusOnStopUpdate,
+  calculateVehicleStatusFromJobs,
+  updateVehicleTransportJobsHistory
 } = require('../utils/statusManager');
 
 /**
@@ -54,11 +57,17 @@ exports.getMyRoutes = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
           path: 'vehicleId',
           select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
         }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -66,6 +75,10 @@ exports.getMyRoutes = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -115,11 +128,17 @@ exports.getMyRouteById = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year status')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
           path: 'vehicleId',
           select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
         }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -127,6 +146,10 @@ exports.getMyRouteById = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber description loadType weight dimensions quantity unit shipperName shipperCompany'
           },
           {
             path: 'pickupRouteId',
@@ -199,10 +222,10 @@ exports.startMyRoute = async (req, res) => {
         });
       } else {
         // Current route is still active (not completed), so prevent starting new route
-        return res.status(400).json({
-          success: false,
-          message: 'You already have an active route. Please complete your current route before starting a new one.'
-        });
+      return res.status(400).json({
+        success: false,
+        message: 'You already have an active route. Please complete your current route before starting a new one.'
+      });
       }
     }
 
@@ -275,11 +298,17 @@ exports.startMyRoute = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -287,6 +316,10 @@ exports.startMyRoute = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -365,11 +398,17 @@ exports.stopMyRoute = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -377,6 +416,10 @@ exports.stopMyRoute = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -455,11 +498,17 @@ exports.resumeMyRoute = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -467,6 +516,10 @@ exports.resumeMyRoute = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -560,11 +613,17 @@ exports.completeMyRoute = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -572,6 +631,10 @@ exports.completeMyRoute = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -785,11 +848,17 @@ exports.updateMyRoute = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
           path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -797,6 +866,10 @@ exports.updateMyRoute = async (req, res) => {
           {
           path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -907,15 +980,16 @@ exports.completeMyRouteStop = async (req, res) => {
         : originalStop.transportJobId;
 
       if (jobId && updatedStopForPhotos.photos && Array.isArray(updatedStopForPhotos.photos)) {
-        // Get ALL vehicle photos from the stop
-        const vehiclePhotoUrls = updatedStopForPhotos.photos
-          .filter(p => p.photoType === 'vehicle')
+        // Get ALL photos from the stop that were taken during this operation
+        // Include both vehicle/load photos and stop photos taken at pickup/delivery
+        const operationPhotoUrls = updatedStopForPhotos.photos
+          .filter(p => p.photoType === 'vehicle' || p.photoType === 'stop')
           .map(p => p.url);
 
-        // Overwrite transport job photos with all vehicle photos from stop (ensures consistency)
+        // Overwrite transport job photos with all photos from stop (ensures consistency)
         const updateField = originalStop.stopType === 'pickup' ? 'pickupPhotos' : 'deliveryPhotos';
         await TransportJob.findByIdAndUpdate(jobId, {
-          [updateField]: vehiclePhotoUrls // Overwrite with current photos
+          [updateField]: operationPhotoUrls // Overwrite with current photos
         });
       }
     }
@@ -992,11 +1066,17 @@ exports.completeMyRouteStop = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -1004,6 +1084,10 @@ exports.completeMyRouteStop = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -1107,8 +1191,6 @@ exports.skipMyRouteStop = async (req, res) => {
 
           // Update vehicle status
           if (transportJob.vehicleId) {
-            const Vehicle = require('../models/Vehicle');
-            const { calculateVehicleStatusFromJobs, updateVehicleTransportJobsHistory } = require('../utils/statusManager');
             const newVehicleStatus = await calculateVehicleStatusFromJobs(transportJob.vehicleId);
             await Vehicle.findByIdAndUpdate(transportJob.vehicleId, {
               status: newVehicleStatus
@@ -1169,11 +1251,17 @@ exports.skipMyRouteStop = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -1181,6 +1269,10 @@ exports.skipMyRouteStop = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -1331,15 +1423,16 @@ exports.uploadStopPhotos = async (req, res) => {
         : originalStop.transportJobId;
 
       if (jobId && updatedStop.photos && Array.isArray(updatedStop.photos)) {
-        // Get ALL vehicle photos from the stop (not just new ones)
-        const vehiclePhotoUrls = updatedStop.photos
-          .filter(p => p.photoType === 'vehicle')
+        // Get ALL photos from the stop that were taken during this operation
+        // Include both vehicle/load photos and stop photos taken at pickup/delivery
+        const operationPhotoUrls = updatedStop.photos
+          .filter(p => p.photoType === 'vehicle' || p.photoType === 'stop')
           .map(p => p.url);
 
-        // Overwrite transport job photos with all vehicle photos from stop (ensures consistency)
+        // Overwrite transport job photos with all photos from stop (ensures consistency)
         const updateField = originalStop.stopType === 'pickup' ? 'pickupPhotos' : 'deliveryPhotos';
         await TransportJob.findByIdAndUpdate(jobId, {
-          [updateField]: vehiclePhotoUrls // Overwrite with current photos
+          [updateField]: operationPhotoUrls // Overwrite with current photos
         });
       }
     }
@@ -1350,11 +1443,17 @@ exports.uploadStopPhotos = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
           path: 'vehicleId',
           select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
         }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -1362,6 +1461,10 @@ exports.uploadStopPhotos = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -1472,11 +1575,17 @@ exports.removeStopPhoto = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
-          path: 'vehicleId',
-          select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
-        }
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
+            path: 'vehicleId',
+            select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
+          }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -1484,6 +1593,10 @@ exports.removeStopPhoto = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',
@@ -1572,11 +1685,17 @@ exports.updateMyRouteStop = async (req, res) => {
       .populate('truckId', 'truckNumber licensePlate make model year')
       .populate({
         path: 'selectedTransportJobs',
-        select: 'jobNumber status vehicleId carrier carrierPayment',
-        populate: {
+        select: 'jobNumber status vehicleId loadId loadType carrier carrierPayment',
+        populate: [
+          {
           path: 'vehicleId',
           select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
         }
+        ]
       })
       .populate({
         path: 'stops.transportJobId',
@@ -1584,6 +1703,10 @@ exports.updateMyRouteStop = async (req, res) => {
           {
             path: 'vehicleId',
             select: 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd pickupContactName pickupContactPhone dropContactName dropContactPhone documents notes'
+          },
+          {
+            path: 'loadId',
+            select: 'loadNumber loadType description weight dimensions quantity unit initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip documents notes'
           },
           {
             path: 'pickupRouteId',

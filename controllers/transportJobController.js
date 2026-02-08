@@ -1,7 +1,16 @@
 const TransportJob = require('../models/TransportJob');
 const Vehicle = require('../models/Vehicle');
+const Load = require('../models/Load');
+const Route = require('../models/Route');
 const AuditLog = require('../models/AuditLog');
-const { updateStatusOnTransportJobCreate, syncTransportJobToRouteStops } = require('../utils/statusManager');
+const { 
+  updateStatusOnTransportJobCreate, 
+  syncTransportJobToRouteStops,
+  updateStatusOnTransportJobStatusChange,
+  calculateVehicleStatusFromJobs,
+  calculateLoadStatusFromJobs
+} = require('../utils/statusManager');
+const { VEHICLE_STATUS, LOAD_STATUS } = require('../constants/status');
 
 /**
  * Create a new transport job
@@ -30,6 +39,8 @@ exports.createTransportJob = async (req, res) => {
       details: {
         jobNumber: transportJob.jobNumber,
         vehicleId: jobData.vehicleId,
+        loadId: jobData.loadId,
+        loadType: jobData.loadType || 'vehicle',
         carrier: jobData.carrier,
         status: transportJob.status
       },
@@ -37,7 +48,7 @@ exports.createTransportJob = async (req, res) => {
     });
 
     // If vehicleId is provided, update vehicle with transport job reference and history
-    if (jobData.vehicleId) {
+    if (jobData.vehicleId && jobData.loadType !== 'load') {
       const vehicle = await Vehicle.findById(jobData.vehicleId);
       if (vehicle) {
         // Add to transport history
@@ -59,12 +70,37 @@ exports.createTransportJob = async (req, res) => {
       }
     }
 
-    // Update statuses: transport job to "Needs Dispatch", vehicle to "Ready for Transport"
-    await updateStatusOnTransportJobCreate(transportJob._id, jobData.vehicleId);
+    // If loadId is provided, update load with transport job reference and history
+    if (jobData.loadId && jobData.loadType === 'load') {
+      const load = await Load.findById(jobData.loadId);
+      if (load) {
+        // Add to transport history
+        const transportHistoryEntry = {
+          transportJobId: transportJob._id,
+          routeId: null, // Will be set when route is created
+          status: 'pending',
+          transportPurpose: jobData.transportPurpose || 'initial_delivery',
+          createdAt: new Date()
+        };
+
+      await Load.findByIdAndUpdate(jobData.loadId, {
+          $push: { transportJobs: transportHistoryEntry },
+          $inc: { totalTransports: 1 },
+          currentTransportJobId: transportJob._id,
+          lastTransportDate: new Date(),
+          isAvailableForTransport: false
+      });
+      }
+    }
+
+    // Update statuses: transport job to "Needs Dispatch", vehicle/load to "Ready for Transport"
+    const entityId = jobData.loadType === 'load' ? jobData.loadId : jobData.vehicleId;
+    await updateStatusOnTransportJobCreate(transportJob._id, entityId, jobData.loadType || 'vehicle');
 
     // Reload transport job to get updated status
     const updatedTransportJob = await TransportJob.findById(transportJob._id)
-      .populate('vehicleId', 'vin year make model');
+      .populate('vehicleId', 'vin year make model')
+      .populate('loadId', 'loadNumber loadType description shipperId shipperName shipperCompany shipperEmail shipperPhone submissionDate');
 
     res.status(201).json({
       success: true,
@@ -130,6 +166,7 @@ exports.getAllTransportJobs = async (req, res) => {
     const transportJobs = await TransportJob.find(query)
       .sort({ createdAt: -1 })
       .populate('vehicleId', 'vin year make model pickupLocationName pickupCity pickupState pickupZip pickupDateStart pickupDateEnd pickupTimeStart pickupTimeEnd pickupContactName pickupContactPhone dropLocationName dropCity dropState dropZip dropDateStart dropDateEnd dropTimeStart dropTimeEnd dropContactName dropContactPhone availableToShipDate')
+      .populate('loadId', 'loadNumber loadType description weight dimensions quantity unit shipperId shipperName shipperCompany shipperEmail shipperPhone submissionDate initialPickupLocationName initialPickupCity initialPickupState initialPickupZip initialDropLocationName initialDropCity initialDropState initialDropZip')
       .populate({
         path: 'routeId',
         select: 'routeNumber status',
@@ -187,6 +224,7 @@ exports.getTransportJobById = async (req, res) => {
   try {
     const transportJob = await TransportJob.findById(req.params.id)
       .populate('vehicleId')
+      .populate('loadId', 'loadNumber loadType description weight dimensions quantity unit shipperId shipperName shipperCompany shipperEmail shipperPhone submissionDate')
       .populate({
         path: 'routeId',
         populate: [
@@ -255,6 +293,7 @@ exports.updateTransportJob = async (req, res) => {
       }
     )
       .populate('vehicleId', 'vin year make model')
+      .populate('loadId', 'loadNumber loadType description weight dimensions quantity unit shipperId shipperName shipperCompany shipperEmail shipperPhone submissionDate')
       .populate({
         path: 'routeId',
         select: 'routeNumber status',
@@ -277,7 +316,6 @@ exports.updateTransportJob = async (req, res) => {
 
     // Update vehicle status and transportJobs history if transport job status changed
     if (updateData.status) {
-      const { updateStatusOnTransportJobStatusChange } = require('../utils/statusManager');
       await updateStatusOnTransportJobStatusChange(req.params.id);
     }
 
@@ -321,7 +359,8 @@ exports.updateTransportJob = async (req, res) => {
 exports.deleteTransportJob = async (req, res) => {
   try {
     const transportJob = await TransportJob.findById(req.params.id)
-      .populate('vehicleId');
+      .populate('vehicleId')
+      .populate('loadId', 'loadNumber loadType description shipperId shipperName shipperCompany shipperEmail shipperPhone submissionDate');
 
     if (!transportJob) {
       return res.status(404).json({
@@ -330,9 +369,6 @@ exports.deleteTransportJob = async (req, res) => {
       });
     }
 
-    const Route = require('../models/Route');
-    const { calculateVehicleStatusFromJobs } = require('../utils/statusManager');
-    const { VEHICLE_STATUS } = require('../constants/status');
 
     // Find all routes that have stops referencing this transport job (only non-deleted routes)
     const routesWithJob = await Route.find({
@@ -348,7 +384,20 @@ exports.deleteTransportJob = async (req, res) => {
     if (routesWithJob.length > 0) {
       effects.push(`This transport job is referenced in ${routesWithJob.length} route(s).`);
     }
-    if (transportJob.vehicleId) {
+    if (transportJob.loadType === 'load' && transportJob.loadId) {
+      const load = await Load.findById(transportJob.loadId);
+      if (load && !load.deleted) {
+        const allJobs = await TransportJob.find({ 
+          loadId: transportJob.loadId,
+          deleted: { $ne: true } // Only count non-deleted jobs
+        });
+        if (allJobs.length === 1) {
+          effects.push(`Load status will be set to "Intake Completed" (this is the only transport job).`);
+        } else {
+          effects.push(`Load status will be recalculated based on remaining ${allJobs.length - 1} transport job(s).`);
+        }
+      }
+    } else if (transportJob.vehicleId) {
       const vehicle = await Vehicle.findById(transportJob.vehicleId);
       if (vehicle && !vehicle.deleted) {
         const allJobs = await TransportJob.find({ 
@@ -374,8 +423,45 @@ exports.deleteTransportJob = async (req, res) => {
       });
     }
 
-    // Update vehicle status based on remaining transport jobs (only if vehicle is not deleted)
-    if (transportJob.vehicleId) {
+    // Update vehicle or load status based on remaining transport jobs
+    if (transportJob.loadType === 'load' && transportJob.loadId) {
+      const loadId = typeof transportJob.loadId === 'object'
+        ? (transportJob.loadId._id || transportJob.loadId.id)
+        : transportJob.loadId;
+      
+      const load = await Load.findById(loadId);
+      if (load && !load.deleted) {
+        // Get all remaining non-deleted transport jobs for this load
+        const remainingJobs = await TransportJob.find({
+          loadId: loadId,
+          _id: { $ne: req.params.id },
+          deleted: { $ne: true }
+        });
+
+        if (remainingJobs.length === 0) {
+          // No remaining jobs - set load to "Intake Completed"
+          await Load.findByIdAndUpdate(loadId, {
+            status: LOAD_STATUS.INTAKE_COMPLETE,
+            currentTransportJobId: null,
+            $pull: { transportJobs: { transportJobId: req.params.id } }
+          });
+        } else {
+          // Recalculate load status based on remaining jobs
+          const newLoadStatus = await calculateLoadStatusFromJobs(loadId);
+          await Load.findByIdAndUpdate(loadId, {
+            status: newLoadStatus,
+            $pull: { transportJobs: { transportJobId: req.params.id } }
+          });
+          
+          // If the deleted job was the current one, set a new current job
+          if (load.currentTransportJobId && load.currentTransportJobId.toString() === req.params.id.toString()) {
+            await Load.findByIdAndUpdate(loadId, {
+              currentTransportJobId: remainingJobs[0]._id
+            });
+          }
+        }
+      }
+    } else if (transportJob.vehicleId) {
       const vehicleId = typeof transportJob.vehicleId === 'object'
         ? (transportJob.vehicleId._id || transportJob.vehicleId.id)
         : transportJob.vehicleId;

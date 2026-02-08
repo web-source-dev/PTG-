@@ -51,7 +51,15 @@ const shipperSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  totalLoads: {
+    type: Number,
+    default: 0
+  },
   totalDeliveredVehicles: {
+    type: Number,
+    default: 0
+  },
+  totalDeliveredLoads: {
     type: Number,
     default: 0
   },

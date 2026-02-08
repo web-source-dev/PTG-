@@ -114,7 +114,8 @@ const uploadFromBase64 = async (base64String, folder = 'vos-ptg', options = {}) 
     }
 
     const uploadOptions = {
-      folder: folder,
+      // Don't set folder if public_id already includes it (to avoid duplication)
+      ...(publicId ? {} : { folder: folder }),
       resource_type: resourceType,
       // Add public_id with extension to preserve filename (especially for PDFs)
       // The public_id with .pdf extension ensures Cloudinary preserves it

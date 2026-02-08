@@ -55,6 +55,15 @@ const VEHICLE_STATUS = {
   CANCELLED: 'Cancelled'
 };
 
+// Load Status (for non-vehicle loads)
+const LOAD_STATUS = {
+  INTAKE_COMPLETE: 'Intake Completed',
+  READY_FOR_TRANSPORT: 'Ready for Transport',
+  IN_TRANSPORT: 'In Transport',
+  DELIVERED: 'Delivered',
+  CANCELLED: 'Cancelled'
+};
+
 // Route Stop Type
 const ROUTE_STOP_TYPE = {
   START: 'start',
@@ -133,6 +142,16 @@ const getAllStatusEnums = () => {
         [VEHICLE_STATUS.CANCELLED]: 'Cancelled'
       }
     },
+    load: {
+      values: Object.values(LOAD_STATUS),
+      labels: {
+        [LOAD_STATUS.INTAKE_COMPLETE]: 'Intake Completed',
+        [LOAD_STATUS.READY_FOR_TRANSPORT]: 'Ready for Transport',
+        [LOAD_STATUS.IN_TRANSPORT]: 'In Transport',
+        [LOAD_STATUS.DELIVERED]: 'Delivered',
+        [LOAD_STATUS.CANCELLED]: 'Cancelled'
+      }
+    },
     routeStopType: {
       values: Object.values(ROUTE_STOP_TYPE),
       labels: {
@@ -158,6 +177,7 @@ module.exports = {
   TRANSPORT_JOB_STATUS,
   TRUCK_STATUS,
   VEHICLE_STATUS,
+  LOAD_STATUS,
   ROUTE_STOP_TYPE,
   CARRIER,
   getAllStatusEnums

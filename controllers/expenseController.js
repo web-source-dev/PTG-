@@ -1,6 +1,7 @@
 const Expense = require('../models/Expense');
 const AuditLog = require('../models/AuditLog');
 const routeTracker = require('../utils/routeTracker');
+const locationService = require('../utils/locationService');
 
 /**
  * Expense Controller
@@ -27,7 +28,6 @@ exports.createFuelExpense = async (req, res) => {
         accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
       } : undefined,
       askedLocation: askedLocation ? (() => {
-        const locationService = require('../utils/locationService');
         const loc = {
           latitude: parseFloat(askedLocation.latitude),
           longitude: parseFloat(askedLocation.longitude),
@@ -116,7 +116,6 @@ exports.createMaintenanceExpense = async (req, res) => {
         accuracy: backgroundLocation.accuracy ? parseFloat(backgroundLocation.accuracy) : undefined
       } : undefined,
       askedLocation: askedLocation ? (() => {
-        const locationService = require('../utils/locationService');
         const loc = {
           latitude: parseFloat(askedLocation.latitude),
           longitude: parseFloat(askedLocation.longitude),

@@ -392,9 +392,44 @@ routeSchema.pre('save', async function(next) {
   // Initialize checklists and populate formattedAddress for stops
   if (this.stops && Array.isArray(this.stops)) {
     const { getDefaultChecklist } = require('../utils/checklistDefaults');
+    const TransportJob = require('./TransportJob');
+
+    // Get all transport job IDs that need checklist initialization
+    const transportJobIds = this.stops
+      .filter(stop => (!stop.checklist || stop.checklist.length === 0) &&
+                      (stop.stopType === 'pickup' || stop.stopType === 'drop') &&
+                      stop.transportJobId)
+      .map(stop => {
+        if (typeof stop.transportJobId === 'object' && stop.transportJobId !== null) {
+          return stop.transportJobId._id || stop.transportJobId;
+        }
+        return stop.transportJobId;
+      })
+      .filter(Boolean);
+
+    // Fetch transport jobs to determine load type
+    let transportJobsMap = new Map();
+    if (transportJobIds.length > 0) {
+      const transportJobs = await TransportJob.find({ _id: { $in: transportJobIds } }, 'loadType');
+      transportJobsMap = new Map(transportJobs.map(job => [job._id.toString(), job]));
+    }
+
     this.stops.forEach(stop => {
       if (!stop.checklist || stop.checklist.length === 0) {
-        stop.checklist = getDefaultChecklist(stop.stopType);
+        // Determine if this is a load transport job
+        let isLoad = false;
+        if ((stop.stopType === 'pickup' || stop.stopType === 'drop') && stop.transportJobId) {
+          const jobId = typeof stop.transportJobId === 'object' && stop.transportJobId !== null
+            ? stop.transportJobId._id || stop.transportJobId
+            : stop.transportJobId;
+          if (jobId) {
+            const transportJob = transportJobsMap.get(jobId.toString());
+            if (transportJob) {
+              isLoad = transportJob.loadType === 'load';
+            }
+          }
+        }
+        stop.checklist = getDefaultChecklist(stop.stopType, isLoad);
       }
       // Populate formattedAddress for stop location
       if (stop.location) {

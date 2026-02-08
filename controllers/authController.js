@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const Expense = require('../models/Expense');
@@ -209,7 +210,7 @@ const resetPassword = async (req, res) => {
     const { token, password } = req.body;
 
     // Hash the token from request
-    const hashedToken = require('crypto').createHash('sha256').update(token).digest('hex');
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
     // Find user with valid reset token
     const user = await User.findOne({

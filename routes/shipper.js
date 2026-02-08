@@ -12,6 +12,9 @@ router.get('/simple', shipperController.getAllShippersSimple);
 // Get all shippers with pagination
 router.get('/', shipperController.getAllShippers);
 
+// Recalculate statistics for all shippers (admin utility)
+router.post('/recalculate-statistics', authorizeRoles('ptgAdmin'), shipperController.recalculateAllShipperStatistics);
+
 // Get shipper profile with vehicles and routes
 router.get('/:id/profile', shipperController.getShipperProfile);
 

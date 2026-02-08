@@ -1,6 +1,7 @@
 const axios = require('axios');
 const Route = require('../models/Route');
 const User = require('../models/User');
+const TransportJob = require('../models/TransportJob');
 
 // Google Maps API configuration
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
@@ -141,7 +142,6 @@ class LocationService {
             if (stop.stopType === 'pickup' || stop.stopType === 'drop') {
               // Transport stops: get address from associated vehicle
               if (stop.transportJobId) {
-                const TransportJob = require('../models/TransportJob');
                 const transportJob = await TransportJob.findById(stop.transportJobId).populate('vehicleId');
 
                 if (transportJob?.vehicleId) {
@@ -213,7 +213,6 @@ class LocationService {
               if (prevStop.stopType === 'pickup' || prevStop.stopType === 'drop') {
                 // Transport stops: get address from associated vehicle
                 if (prevStop.transportJobId) {
-                  const TransportJob = require('../models/TransportJob');
                   const transportJob = await TransportJob.findById(prevStop.transportJobId).populate('vehicleId');
 
                   if (transportJob?.vehicleId) {
@@ -461,7 +460,8 @@ class LocationService {
 
   /**
    * Build formatted address string from location object
-   * Format: "Address, City, State ZIP"
+   * Format: "Name, City, State ZIP" or "Address, City, State ZIP" or "City, State ZIP"
+   * Prioritizes name (business/location name) over address (street address)
    * @param {Object} location - Location object with address, name, city, state, zip fields
    * @returns {string} Formatted address
    */
@@ -492,42 +492,61 @@ class LocationService {
     const nameContainsState = state && nameNorm && nameNorm.includes(stateNorm);
     const nameContainsZip = zip && nameNorm && nameNorm.includes(zipNorm);
     
-    // If address exists and already contains city AND state, use it as-is (clean up USA)
-    if (address && addressContainsCity && addressContainsState) {
-      // Remove trailing ", USA" and any duplicate patterns
+    // Check if address is a full formatted address (contains city AND state)
+    const addressIsFull = address && addressContainsCity && addressContainsState;
+    // Check if name is a full formatted address (contains city AND state)
+    const nameIsFull = name && nameContainsCity && nameContainsState;
+    
+    // If address is already a full formatted address, clean it up and return
+    if (addressIsFull) {
       let cleaned = address.replace(/,\s*USA\s*,?\s*$/i, '').trim();
       // Remove trailing duplicate city/state/zip if present
       if (city && state) {
-        const duplicatePattern = new RegExp(`,\\s*${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,\\s*${state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s*,\\s*${zip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})?\\s*$`, 'i');
+        const duplicatePattern = new RegExp(`,\\s*${city.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*,\\s*${state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s*${zip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})?\\s*$`, 'i');
         cleaned = cleaned.replace(duplicatePattern, '').trim();
       }
       return cleaned;
     }
     
-    // If name exists and already contains city AND state, use it as-is
-    if (!address && name && nameContainsCity && nameContainsState) {
+    // If name is already a full formatted address, return it as-is
+    if (nameIsFull && !address) {
       return name;
     }
     
-    // Build the result - only add what's missing
+    // Build the result - prioritize name over address for business/location names
     const parts = [];
     
-    // Add address or name first
-    if (address) {
-      parts.push(address);
-    } else if (name) {
+    // Determine if address is a street address (contains street number pattern)
+    const isStreetAddress = address && /\d+\s+[A-Za-z]/.test(address);
+    
+    // Add name first if available (business/location name)
+    // Only use address if it's a street address and name is not available
+    if (name && !nameIsFull) {
       parts.push(name);
+    } else if (address && isStreetAddress && !addressIsFull) {
+      parts.push(address);
     }
     
-    // Only add city/state/zip if they're not already in address or name
-    const shouldAddCity = city && !addressContainsCity && !nameContainsCity;
-    const shouldAddState = state && !addressContainsState && !nameContainsState;
-    const shouldAddZip = zip && !addressContainsZip && !nameContainsZip;
+    // Build city, state, zip part
+    // Only add if they're not already in the name or address
+    const shouldAddCity = city && !nameContainsCity && !addressContainsCity;
+    const shouldAddState = state && !nameContainsState && !addressContainsState;
+    const shouldAddZip = zip && !nameContainsZip && !addressContainsZip;
     
     if (shouldAddCity || shouldAddState || shouldAddZip) {
+      // Format as "City, State ZIP" (ZIP without comma before it)
       const cityState = [shouldAddCity ? city : '', shouldAddState ? state : ''].filter(Boolean).join(', ');
       const cityStateZip = shouldAddZip && cityState ? `${cityState} ${zip}` : (shouldAddZip ? zip : cityState);
       
+      if (cityStateZip) {
+        parts.push(cityStateZip);
+      }
+    }
+    
+    // If we have no parts yet but have city/state/zip, use them
+    if (parts.length === 0 && (city || state || zip)) {
+      const cityState = [city, state].filter(Boolean).join(', ');
+      const cityStateZip = zip && cityState ? `${cityState} ${zip}` : (zip || cityState);
       if (cityStateZip) {
         parts.push(cityStateZip);
       }

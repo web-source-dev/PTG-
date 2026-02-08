@@ -1,6 +1,7 @@
 const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
 const User = require('../models/User');
+const Route = require('../models/Route');
 
 class RouteTrackerService {
   constructor() {
@@ -114,7 +115,6 @@ class RouteTrackerService {
         
         // If not found, try to get driver from route
         if (!user) {
-          const Route = require('../models/Route');
           const route = await Route.findById(routeId).populate('driverId');
           if (route && route.driverId) {
             user = route.driverId;
@@ -125,7 +125,6 @@ class RouteTrackerService {
           tracker = await this.initializeTracking(routeId, user._id, null, auditLogId);
         } else {
           // Try to create tracker anyway with route info
-          const Route = require('../models/Route');
           const route = await Route.findById(routeId);
           if (route && route.driverId) {
             const driverId = typeof route.driverId === 'object' ? route.driverId._id : route.driverId;

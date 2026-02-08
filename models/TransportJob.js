@@ -8,10 +8,29 @@ const transportJobSchema = new mongoose.Schema({
     trim: true
   },
 
-  // Vehicle Reference
+  // Load Type - determines if this job is for a vehicle or other load
+  loadType: {
+    type: String,
+    enum: ['vehicle', 'load'],
+    default: 'vehicle'
+  },
+  
+  // Vehicle Reference (required if loadType is 'vehicle')
   vehicleId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Vehicle'
+    ref: 'Vehicle',
+    required: function() {
+      return this.loadType === 'vehicle';
+    }
+  },
+  
+  // Load Reference (required if loadType is 'load')
+  loadId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Load',
+    required: function() {
+      return this.loadType === 'load';
+    }
   },
 
   // Status Tracking
@@ -242,6 +261,19 @@ const transportJobSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  
+  // Deletion tracking (for load deletion)
+  loadDeleted: {
+    type: Boolean,
+    default: false
+  },
+  loadDeletedAt: {
+    type: Date
+  },
+  loadDeletionLabel: {
+    type: String,
+    trim: true
+  },
 
   // Soft delete fields (for transport job deletion)
   deleted: {
@@ -277,6 +309,8 @@ const transportJobSchema = new mongoose.Schema({
 // Index for efficient queries
 transportJobSchema.index({ jobNumber: 1 });
 transportJobSchema.index({ vehicleId: 1 });
+transportJobSchema.index({ loadId: 1 });
+transportJobSchema.index({ loadType: 1 });
 transportJobSchema.index({ status: 1 });
 transportJobSchema.index({ carrier: 1 });
 transportJobSchema.index({ routeId: 1 }); // Backward compatibility

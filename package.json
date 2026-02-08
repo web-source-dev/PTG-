@@ -10,6 +10,7 @@
     "seed:clear": "node scripts/seed.js --clear",
     "seed:vehicles-jobs": "node scripts/seedVehiclesAndJobs.js",
     "migrate:shippers": "node scripts/migrateShippers.js",
+    "migrate:formatted-addresses": "node scripts/populateFormattedAddresses.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

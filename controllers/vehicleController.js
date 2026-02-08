@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Vehicle = require('../models/Vehicle');
 const TransportJob = require('../models/TransportJob');
+const Route = require('../models/Route');
 const AuditLog = require('../models/AuditLog');
 const Shipper = require('../models/Shipper');
 const { updateVehicleOnCreate } = require('../utils/statusManager');
@@ -257,7 +258,6 @@ exports.getVehicleById = async (req, res) => {
     // If vehicle has a transport job, include the photos and checklists from it
     let transportJobData = null;
     if (vehicle.currentTransportJobId) {
-      const TransportJob = require('../models/TransportJob');
       const transportJob = await TransportJob.findById(vehicle.currentTransportJobId._id)
         .select('pickupPhotos deliveryPhotos pickupChecklist deliveryChecklist status');
 
@@ -579,7 +579,6 @@ exports.deleteVehicle = async (req, res) => {
       effects.push(`This vehicle has ${transportJobs.length} transport job(s) that will be preserved.`);
       
       // Check if any transport jobs are in routes
-      const Route = require('../models/Route');
       let routesAffected = 0;
       for (const job of transportJobs) {
         const routes = await Route.find({

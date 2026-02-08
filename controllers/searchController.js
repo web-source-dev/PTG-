@@ -1,4 +1,5 @@
 const Vehicle = require('../models/Vehicle');
+const Load = require('../models/Load');
 const Route = require('../models/Route');
 const TransportJob = require('../models/TransportJob');
 const Truck = require('../models/Truck');
@@ -101,6 +102,22 @@ exports.globalSearch = async (req, res) => {
       .limit(searchLimit)
       .sort({ createdAt: -1 }),
 
+      // Loads (exclude deleted)
+      Load.find({
+        deleted: { $ne: true }, // Exclude deleted loads
+        $or: [
+          { loadNumber: searchRegex },
+          { description: searchRegex },
+          { loadType: searchRegex },
+          { shipperName: searchRegex },
+          { shipperCompany: searchRegex }
+        ]
+      })
+      .select('loadNumber loadType description weight dimensions quantity unit status shipperName shipperCompany createdAt currentTransportJobId')
+      .populate('currentTransportJobId', 'jobNumber status')
+      .limit(searchLimit)
+      .sort({ createdAt: -1 }),
+
       // Routes (exclude deleted)
       Route.find({
         deleted: { $ne: true }, // Exclude deleted routes
@@ -121,8 +138,9 @@ exports.globalSearch = async (req, res) => {
           { jobNumber: searchRegex }
         ]
       })
-      .select('jobNumber status carrier createdAt')
+      .select('jobNumber status carrier loadType createdAt')
       .populate('vehicleId', 'vin year make model')
+      .populate('loadId', 'loadNumber loadType description shipperId shipperName shipperCompany shipperEmail shipperPhone submissionDate')
       .populate('routeId', 'routeNumber status')
       .populate('pickupRouteId', 'routeNumber status')
       .populate('dropRouteId', 'routeNumber status')
@@ -169,6 +187,7 @@ exports.globalSearch = async (req, res) => {
 
     const [
       vehicles,
+      loads,
       routes,
       transportJobs,
       trucks,
@@ -196,6 +215,27 @@ exports.globalSearch = async (req, res) => {
         url: `/vehicles/${vehicle._id}`,
         createdAt: vehicle.createdAt
       })),
+      loads: loads.map(load => ({
+        _id: load._id,
+        type: 'load',
+        title: load.description || load.loadNumber || `Load ${load._id}`,
+        subtitle: `${load.loadType || 'Other'} • ${load.loadNumber || 'No number'}`,
+        status: load.status,
+        details: {
+          loadNumber: load.loadNumber,
+          loadType: load.loadType,
+          description: load.description,
+          weight: load.weight,
+          dimensions: load.dimensions,
+          quantity: load.quantity,
+          unit: load.unit,
+          shipperName: load.shipperName,
+          shipperCompany: load.shipperCompany,
+          transportJob: load.currentTransportJobId
+        },
+        url: `/loads/${load._id}`,
+        createdAt: load.createdAt
+      })),
       routes: routes.map(route => ({
         _id: route._id,
         type: 'route',
@@ -211,23 +251,35 @@ exports.globalSearch = async (req, res) => {
         url: `/routes/${route._id}`,
         createdAt: route.createdAt
       })),
-      transportJobs: transportJobs.map(job => ({
-        _id: job._id,
-        type: 'transportJob',
-        title: job.jobNumber,
-        subtitle: `${job.carrier || 'PTG'} • ${job.vehicleId ? `${job.vehicleId.year} ${job.vehicleId.make} ${job.vehicleId.model}` : 'No vehicle'}`,
-        status: job.status,
-        details: {
-          jobNumber: job.jobNumber,
-          carrier: job.carrier,
-          vehicle: job.vehicleId,
-          route: job.routeId,
-          pickupRoute: job.pickupRouteId,
-          dropRoute: job.dropRouteId
-        },
-        url: `/transport-jobs/${job._id}`,
-        createdAt: job.createdAt
-      })),
+      transportJobs: transportJobs.map(job => {
+        let subtitle = `${job.carrier || 'PTG'}`;
+        if (job.loadType === 'load' && job.loadId) {
+          subtitle += ` • ${job.loadId.loadType || 'Load'}: ${job.loadId.description || job.loadId.loadNumber || 'No description'}`;
+        } else if (job.vehicleId) {
+          subtitle += ` • ${job.vehicleId.year} ${job.vehicleId.make} ${job.vehicleId.model}`;
+        } else {
+          subtitle += ` • No vehicle/load`;
+        }
+        return {
+          _id: job._id,
+          type: 'transportJob',
+          title: job.jobNumber,
+          subtitle: subtitle,
+          status: job.status,
+          details: {
+            jobNumber: job.jobNumber,
+            carrier: job.carrier,
+            loadType: job.loadType,
+            vehicle: job.vehicleId,
+            load: job.loadId,
+            route: job.routeId,
+            pickupRoute: job.pickupRouteId,
+            dropRoute: job.dropRouteId
+          },
+          url: `/transport-jobs/${job._id}`,
+          createdAt: job.createdAt
+        };
+      }),
       trucks: trucks.map(truck => ({
         _id: truck._id,
         type: 'truck',
@@ -343,6 +395,20 @@ exports.advancedSearch = async (req, res) => {
           if (status) query.status = status;
           break;
 
+        case 'load':
+          query = {
+            deleted: { $ne: true }, // Exclude deleted loads
+            $or: [
+              { loadNumber: searchRegex },
+              { description: searchRegex },
+              { loadType: searchRegex },
+              { shipperName: searchRegex },
+              { shipperCompany: searchRegex }
+            ]
+          };
+          if (status) query.status = status;
+          break;
+
         case 'route':
           query = {
             deleted: { $ne: true }, // Exclude deleted routes
@@ -438,10 +504,20 @@ exports.advancedSearch = async (req, res) => {
           .sort({ createdAt: -1 });
         break;
 
+      case 'load':
+        Model = Load;
+        results = await Load.find(query)
+          .select('loadNumber loadType description weight dimensions quantity unit status shipperName shipperCompany createdAt currentTransportJobId')
+          .populate('currentTransportJobId', 'jobNumber status')
+          .limit(searchLimit)
+          .sort({ createdAt: -1 });
+        break;
+
       case 'transportJob':
         Model = TransportJob;
         results = await TransportJob.find(query)
           .populate('vehicleId', 'vin year make model')
+          .populate('loadId', 'loadNumber loadType description shipperId shipperName shipperCompany shipperEmail shipperPhone submissionDate')
           .populate('routeId', 'routeNumber status')
           .limit(searchLimit)
           .sort({ createdAt: -1 });
@@ -518,6 +594,29 @@ function formatSearchResult(item, type) {
         createdAt: item.createdAt
       };
 
+    case 'load':
+      return {
+        _id: item._id,
+        type: 'load',
+        title: item.description || item.loadNumber || `Load ${item._id}`,
+        subtitle: `${item.loadType || 'Other'} • ${item.loadNumber || 'No number'}`,
+        status: item.status,
+        details: {
+          loadNumber: item.loadNumber,
+          loadType: item.loadType,
+          description: item.description,
+          weight: item.weight,
+          dimensions: item.dimensions,
+          quantity: item.quantity,
+          unit: item.unit,
+          shipperName: item.shipperName,
+          shipperCompany: item.shipperCompany,
+          transportJob: item.currentTransportJobId
+        },
+        url: `/loads/${item._id}`,
+        createdAt: item.createdAt
+      };
+
     case 'route':
       return {
         _id: item._id,
@@ -536,16 +635,26 @@ function formatSearchResult(item, type) {
       };
 
     case 'transportJob':
+      let subtitle = `${item.carrier || 'PTG'}`;
+      if (item.loadType === 'load' && item.loadId) {
+        subtitle += ` • ${item.loadId.loadType || 'Load'}: ${item.loadId.description || item.loadId.loadNumber || 'No description'}`;
+      } else if (item.vehicleId) {
+        subtitle += ` • ${item.vehicleId.year} ${item.vehicleId.make} ${item.vehicleId.model}`;
+      } else {
+        subtitle += ` • No vehicle/load`;
+      }
       return {
         _id: item._id,
         type: 'transportJob',
         title: item.jobNumber,
-        subtitle: `${item.carrier || 'PTG'} • ${item.vehicleId ? `${item.vehicleId.year} ${item.vehicleId.make} ${item.vehicleId.model}` : 'No vehicle'}`,
+        subtitle: subtitle,
         status: item.status,
         details: {
           jobNumber: item.jobNumber,
           carrier: item.carrier,
+          loadType: item.loadType,
           vehicle: item.vehicleId,
+          load: item.loadId,
           route: item.routeId
         },
         url: `/transport-jobs/${item._id}`,
