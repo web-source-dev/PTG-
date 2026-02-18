@@ -25,6 +25,8 @@ const auditLogSchema = new mongoose.Schema({
       'create_calendar_event', 'update_calendar_event', 'delete_calendar_event',
       // User management actions
       'create_user', 'update_user', 'update_user_role', 'delete_user',
+      // Shipper actions
+      'create_shipper', 'update_shipper', 'delete_shipper',
       // Authentication actions
       'user_login', 'user_login_failed', 'password_reset_requested', 'password_reset_successful',
       // Location actions
@@ -36,7 +38,7 @@ const auditLogSchema = new mongoose.Schema({
 
   entityType: {
     type: String,
-    enum: ['route', 'transportJob', 'vehicle', 'load', 'truck', 'expense', 'user', 'file', 'location', 'calendarEvent', 'vehicleProfitCalculation']
+    enum: ['route', 'transportJob', 'vehicle', 'load', 'truck', 'expense', 'user', 'file', 'location', 'calendarEvent', 'vehicleProfitCalculation', 'shipper']
   },
 
   entityId: {

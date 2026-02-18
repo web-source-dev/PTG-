@@ -16,4 +16,3 @@ router.post('/images', uploadController.uploadImages);
 router.delete('/image/:publicId', uploadController.deleteImage);
 
 module.exports = router;
-
