@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { uploadFromBase64, deleteImage } = require('../config/cloudinary');
 const AuditLog = require('../models/AuditLog');
+const auditService = require('../utils/auditService');
 
 /**
  * Upload single image or document from base64
@@ -204,7 +205,16 @@ exports.uploadImage = async (req, res) => {
       errorCode: error.code || error.http_code,
       errorStatus: error.status
     });
-    
+
+    // Log error to audit
+    await auditService.logUserError('upload_image_failed', error, req.user?._id, {
+      fileName: req.body.fileName,
+      fileType: req.body.documentType,
+      photoType: req.body.photoType,
+      base64Size: req.body.base64 ? `${(req.body.base64.length / 1024).toFixed(2)} KB` : 'unknown',
+      context: 'upload_controller_upload_image'
+    });
+
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to upload image',
@@ -342,7 +352,14 @@ exports.uploadImages = async (req, res) => {
       stack: error.stack,
       errorCode: error.code || error.http_code
     });
-    
+
+    // Log error to audit
+    await auditService.logUserError('batch_upload_images_failed', error, req.user?._id, {
+      imageCount: req.body.images ? req.body.images.length : 0,
+      photoType: req.body.photoType,
+      context: 'upload_controller_upload_images'
+    });
+
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to upload images',
@@ -390,6 +407,13 @@ exports.deleteImage = async (req, res) => {
     });
   } catch (error) {
     console.error('Delete image error:', error);
+
+    // Log error to audit
+    await auditService.logUserError('delete_image_failed', error, req.user?._id, {
+      publicId: req.params.publicId,
+      context: 'upload_controller_delete_image'
+    });
+
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to delete image',

@@ -13,6 +13,7 @@ const Route = require('../models/Route');
 const Truck = require('../models/Truck');
 const User = require('../models/User');
 const Expense = require('../models/Expense');
+const auditService = require('./auditService');
 const {
   VEHICLE_STATUS,
   LOAD_STATUS,
@@ -99,6 +100,10 @@ const createMaintenanceExpenseForRoute = async (routeId) => {
 
   } catch (error) {
     console.error('Error creating automatic maintenance expense for route:', error);
+    await auditService.logSystemError('create_maintenance_expense_failed', error, {
+      routeId,
+      context: 'status_manager_create_maintenance_expense'
+    });
     throw error;
   }
 };

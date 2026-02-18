@@ -3,6 +3,7 @@ const { validationResult } = require('express-validator');
 const User = require('../models/User');
 const Expense = require('../models/Expense');
 const AuditLog = require('../models/AuditLog');
+const auditService = require('../utils/auditService');
 const {
   generateToken,
   generateResetToken,
@@ -49,6 +50,10 @@ const register = async (req, res) => {
     });
   } catch (error) {
     console.error('Register error:', error);
+    await auditService.logSystemError('user_registration_failed', error, {
+      email: req.body.email,
+      context: 'auth_controller_register'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error during registration'
@@ -127,6 +132,10 @@ const login = async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    await auditService.logSystemError('user_login_failed_system', error, {
+      email: req.body.email,
+      context: 'auth_controller_login'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error during login'
@@ -195,6 +204,10 @@ const forgotPassword = async (req, res) => {
     }
   } catch (error) {
     console.error('Forgot password error:', error);
+    await auditService.logSystemError('password_reset_request_failed', error, {
+      email: req.body.email,
+      context: 'auth_controller_forgot_password'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error during password reset request'
@@ -259,6 +272,9 @@ const resetPassword = async (req, res) => {
     });
   } catch (error) {
     console.error('Reset password error:', error);
+    await auditService.logSystemError('password_reset_failed', error, {
+      context: 'auth_controller_reset_password'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error during password reset'
@@ -281,6 +297,9 @@ const getProfile = async (req, res) => {
     });
   } catch (error) {
     console.error('Get profile error:', error);
+    await auditService.logUserError('get_profile_failed', error, req.user._id, {
+      context: 'auth_controller_get_profile'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -315,6 +334,9 @@ const updateProfile = async (req, res) => {
     });
   } catch (error) {
     console.error('Update profile error:', error);
+    await auditService.logUserError('update_profile_failed', error, req.user._id, {
+      context: 'auth_controller_update_profile'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -368,6 +390,10 @@ const createUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Create user error:', error);
+    await auditService.logUserError('create_user_failed', error, req.user._id, {
+      email: req.body.email,
+      context: 'auth_controller_create_user'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error during user creation'
@@ -397,6 +423,9 @@ const getAllUsers = async (req, res) => {
     });
   } catch (error) {
     console.error('Get all users error:', error);
+    await auditService.logUserError('get_all_users_failed', error, req.user._id, {
+      context: 'auth_controller_get_all_users'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -471,6 +500,10 @@ const updateUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Update user error:', error);
+    await auditService.logUserError('update_user_failed', error, req.user._id, {
+      userId: req.params.id,
+      context: 'auth_controller_update_user'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -522,6 +555,10 @@ const updateUserRole = async (req, res) => {
     });
   } catch (error) {
     console.error('Update user role error:', error);
+    await auditService.logUserError('update_user_role_failed', error, req.user._id, {
+      userId: req.params.id,
+      context: 'auth_controller_update_user_role'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -623,6 +660,10 @@ const addDriverFuelExpense = async (req, res) => {
     });
   } catch (error) {
     console.error('Add driver fuel expense error:', error);
+    await auditService.logUserError('add_driver_fuel_expense_failed', error, req.user._id, {
+      driverId: req.params.id,
+      context: 'auth_controller_add_driver_fuel_expense'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -683,6 +724,10 @@ const updateDriverStats = async (req, res) => {
     });
   } catch (error) {
     console.error('Update driver stats error:', error);
+    await auditService.logUserError('update_driver_stats_failed', error, req.user._id, {
+      driverId: req.params.id,
+      context: 'auth_controller_update_driver_stats'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'
@@ -736,6 +781,10 @@ const deleteUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Delete user error:', error);
+    await auditService.logUserError('delete_user_failed', error, req.user._id, {
+      userId: req.params.id,
+      context: 'auth_controller_delete_user'
+    });
     res.status(500).json({
       success: false,
       message: 'Server error'

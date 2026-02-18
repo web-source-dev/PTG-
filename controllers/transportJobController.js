@@ -3,6 +3,7 @@ const Vehicle = require('../models/Vehicle');
 const Load = require('../models/Load');
 const Route = require('../models/Route');
 const AuditLog = require('../models/AuditLog');
+const auditService = require('../utils/auditService');
 const { 
   updateStatusOnTransportJobCreate, 
   syncTransportJobToRouteStops,

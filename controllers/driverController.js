@@ -4,6 +4,7 @@ const Truck = require('../models/Truck');
 const User = require('../models/User');
 const Vehicle = require('../models/Vehicle');
 const AuditLog = require('../models/AuditLog');
+const auditService = require('../utils/auditService');
 const routeTracker = require('../utils/routeTracker');
 const { ROUTE_STATE, TRUCK_STATUS, ROUTE_STATUS } = require('../constants/status');
 const {

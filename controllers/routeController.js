@@ -8,6 +8,7 @@ const User = require('../models/User');
 const RouteTracking = require('../models/routeTracker');
 const AuditLog = require('../models/AuditLog');
 const CalendarEvent = require('../models/CalendarEvent');
+const auditService = require('../utils/auditService');
 const locationService = require('../utils/locationService');
 const routeTracker = require('../utils/routeTracker');
 const { getDefaultChecklist } = require('../utils/checklistDefaults');
@@ -366,6 +367,10 @@ exports.createRoute = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating route:', error);
+    await auditService.logUserError('create_route_failed', error, req.user._id, {
+      routeData: req.body,
+      context: 'route_controller_create_route'
+    });
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to create route',
@@ -447,6 +452,10 @@ exports.getAllRoutes = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching routes:', error);
+    await auditService.logUserError('get_routes_failed', error, req.user._id, {
+      query: req.query,
+      context: 'route_controller_get_all_routes'
+    });
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to fetch routes',

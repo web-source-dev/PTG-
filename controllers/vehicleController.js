@@ -4,6 +4,7 @@ const TransportJob = require('../models/TransportJob');
 const Route = require('../models/Route');
 const AuditLog = require('../models/AuditLog');
 const Shipper = require('../models/Shipper');
+const auditService = require('../utils/auditService');
 const { updateVehicleOnCreate } = require('../utils/statusManager');
 const { calculateVehicleDistance, calculateVehiclesDistances } = require('../utils/vehicleDistanceService');
 
@@ -112,6 +113,10 @@ exports.createVehicle = async (req, res) => {
     });
   } catch (error) {
     console.error('Error creating vehicle:', error);
+    await auditService.logUserError('create_vehicle_failed', error, req.user._id, {
+      vehicleData: req.body,
+      context: 'vehicle_controller_create_vehicle'
+    });
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to create vehicle'

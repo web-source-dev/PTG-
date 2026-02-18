@@ -32,13 +32,19 @@ const auditLogSchema = new mongoose.Schema({
       // Location actions
       'update_driver_location',
       // Manual status update actions
-      'manual_status_update'
+      'manual_status_update',
+      // Error logging actions
+      'user_registration_failed', 'user_login_failed_system', 'password_reset_request_failed', 'password_reset_failed',
+      'get_profile_failed', 'update_profile_failed', 'create_user_failed', 'get_all_users_failed', 'update_user_failed',
+      'update_user_role_failed', 'delete_user_failed', 'add_driver_fuel_expense_failed', 'update_driver_stats_failed',
+      'upload_image_failed', 'batch_upload_images_failed', 'delete_image_failed', 'create_vehicle_failed',
+      'create_route_failed', 'get_routes_failed', 'create_maintenance_expense_failed'
     ]
   },
 
   entityType: {
     type: String,
-    enum: ['route', 'transportJob', 'vehicle', 'load', 'truck', 'expense', 'user', 'file', 'location', 'calendarEvent', 'vehicleProfitCalculation', 'shipper']
+    enum: ['route', 'transportJob', 'vehicle', 'load', 'truck', 'expense', 'user', 'file', 'location', 'calendarEvent', 'vehicleProfitCalculation', 'shipper', 'error']
   },
 
   entityId: {

@@ -45,6 +45,67 @@ class AuditService {
   }
 
   /**
+   * Log general error
+   */
+  async logError(action, error, details = {}, userId = null, driverId = null, location = null, routeId = null) {
+    try {
+      const errorMessage = error instanceof Error ? error.message : error.toString();
+      const errorStack = error instanceof Error ? error.stack : null;
+
+      const auditEntry = {
+        action,
+        entityType: 'error',
+        entityId: errorMessage.substring(0, 100), // Use first 100 chars of error as entityId
+        userId,
+        driverId,
+        routeId,
+        location: location ? {
+          latitude: location.latitude,
+          longitude: location.longitude,
+          accuracy: location.accuracy
+        } : null,
+        details: {
+          ...details,
+          errorMessage,
+          errorStack: errorStack?.substring(0, 1000), // Limit stack trace
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          timestamp: new Date().toISOString()
+        }
+      };
+
+      auditEntry.notes = this.generateErrorNote(action, errorMessage, details);
+
+      await AuditLog.create(auditEntry);
+
+      console.log(`Error logged: ${action} - ${errorMessage}`);
+    } catch (auditError) {
+      console.error('Error logging error to audit:', auditError);
+      // Don't fail the main operation if audit logging fails
+    }
+  }
+
+  /**
+   * Log system error (no user context)
+   */
+  async logSystemError(action, error, details = {}) {
+    return this.logError(action, error, details);
+  }
+
+  /**
+   * Log user error (with user context)
+   */
+  async logUserError(action, error, userId, details = {}) {
+    return this.logError(action, error, details, userId);
+  }
+
+  /**
+   * Log driver error (with driver context)
+   */
+  async logDriverError(action, error, driverId, details = {}, location = null, routeId = null) {
+    return this.logError(action, error, details, null, driverId, location, routeId);
+  }
+
+  /**
    * Generate human-readable notes for actions
    */
   generateActionNote(action, details) {
@@ -74,6 +135,19 @@ class AuditService {
       default:
         return action.replace(/_/g, ' ');
     }
+  }
+
+  /**
+   * Generate notes for errors
+   */
+  generateErrorNote(action, errorMessage, details) {
+    const baseNote = `Error in ${action.replace(/_/g, ' ')}: ${errorMessage.substring(0, 100)}`;
+
+    if (details.context) {
+      return `${baseNote} (${details.context})`;
+    }
+
+    return baseNote;
   }
 
   /**
